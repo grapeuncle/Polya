@@ -1,0 +1,135 @@
+{
+  "name": "polya-solver",
+  "displayName": "Polya 数学辅导 (Polya Math Tutor)",
+  "description": "基于波利亚四阶段解题法的交互式数学辅导插件：选中解题步骤即可解释、追问、验证、可视化、生成同类练习。",
+  "version": "0.1.0",
+  "publisher": "polya-tutor",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Education",
+    "Other"
+  ],
+  "keywords": [
+    "math",
+    "polya",
+    "tutor",
+    "education",
+    "latex"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "polya-solver.start",
+        "title": "Polya: 打开数学辅导面板",
+        "category": "Polya"
+      },
+      {
+        "command": "polya-solver.solveSelection",
+        "title": "Polya: 用选中文本作为题目求解",
+        "category": "Polya"
+      },
+      {
+        "command": "polya-solver.setApiKey",
+        "title": "Polya: 设置 API 密钥",
+        "category": "Polya"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "polya-solver.solveSelection",
+          "when": "editorHasSelection",
+          "group": "polya@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Polya 数学辅导",
+      "properties": {
+        "polyaSolver.engine": {
+          "type": "string",
+          "enum": [
+            "mock",
+            "openai",
+            "anthropic"
+          ],
+          "default": "mock",
+          "description": "选择解题引擎。mock 为内置示例数据（无需密钥），openai / anthropic 调用对应的大模型 API。"
+        },
+        "polyaSolver.apiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "大模型 API 密钥。建议改用命令 `Polya: 设置 API 密钥` 存入 SecretStorage 以保证安全；此项作为兜底配置。"
+        },
+        "polyaSolver.openai.baseUrl": {
+          "type": "string",
+          "default": "https://api.openai.com/v1",
+          "description": "OpenAI 兼容接口的 Base URL（可指向自建/代理服务）。"
+        },
+        "polyaSolver.openai.model": {
+          "type": "string",
+          "default": "gpt-4o-mini",
+          "description": "OpenAI 模型名称。"
+        },
+        "polyaSolver.anthropic.baseUrl": {
+          "type": "string",
+          "default": "https://api.anthropic.com",
+          "description": "Anthropic 接口的 Base URL。"
+        },
+        "polyaSolver.anthropic.model": {
+          "type": "string",
+          "default": "claude-3-5-sonnet-latest",
+          "description": "Anthropic 模型名称。"
+        },
+        "polyaSolver.difficulty": {
+          "type": "string",
+          "enum": [
+            "concise",
+            "standard",
+            "detailed"
+          ],
+          "default": "standard",
+          "description": "默认解释详细程度。"
+        },
+        "polyaSolver.teacherMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "教师模式：默认隐藏部分解释内容（如关键启发、答案），由教师手动展开。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "node esbuild.js --production",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p src/webview/tsconfig.json",
+    "lint": "eslint src --ext ts,tsx"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "esbuild": "^0.20.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "@vscode/codicons": "^0.0.35",
+    "@vscode/webview-ui-toolkit": "^1.4.0",
+    "katex": "^0.16.9",
+    "marked": "^12.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "zustand": "^4.5.0"
+  }
+}

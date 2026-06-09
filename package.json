@@ -20,7 +20,9 @@
     "latex"
   ],
   "main": "./dist/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:polya-solver.start"
+  ],
   "contributes": {
     "commands": [
       {
@@ -56,10 +58,11 @@
           "enum": [
             "mock",
             "openai",
-            "anthropic"
+            "anthropic",
+            "deepseek"
           ],
           "default": "mock",
-          "description": "选择解题引擎。mock 为内置示例数据（无需密钥），openai / anthropic 调用对应的大模型 API。"
+          "description": "选择解题引擎。mock 为内置示例数据（无需密钥），openai / anthropic / deepseek 调用对应的大模型 API。"
         },
         "polyaSolver.apiKey": {
           "type": "string",
@@ -86,6 +89,16 @@
           "default": "claude-3-5-sonnet-latest",
           "description": "Anthropic 模型名称。"
         },
+        "polyaSolver.deepseek.baseUrl": {
+          "type": "string",
+          "default": "https://api.deepseek.com/v1",
+          "description": "DeepSeek 接口的 Base URL（OpenAI 兼容）。"
+        },
+        "polyaSolver.deepseek.model": {
+          "type": "string",
+          "default": "deepseek-chat",
+          "description": "DeepSeek 模型名称（如 deepseek-chat、deepseek-reasoner）。"
+        },
         "polyaSolver.difficulty": {
           "type": "string",
           "enum": [
@@ -110,7 +123,9 @@
     "watch": "node esbuild.js --watch",
     "package": "node esbuild.js --production",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p src/webview/tsconfig.json",
-    "lint": "eslint src --ext ts,tsx"
+    "lint": "eslint src --ext ts,tsx",
+    "test:corner": "node scripts/test-corner-cases.mjs",
+    "test:smoke": "node scripts/smoke-test.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
@@ -125,9 +140,9 @@
   },
   "dependencies": {
     "@vscode/codicons": "^0.0.35",
-    "@vscode/webview-ui-toolkit": "^1.4.0",
     "katex": "^0.16.9",
     "marked": "^12.0.0",
+    "mermaid": "^10.9.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "zustand": "^4.5.0"

@@ -3,8 +3,11 @@ import * as vscode from 'vscode';
 import { ISolverEngine, StreamHandlers } from './engines/ISolverEngine';
 import { createEngine } from './engines/factory';
 import {
+  ConversationMessage,
   Difficulty,
   ExtToWebviewMessage,
+  Phase,
+  SolutionBranch,
   SolutionStep,
   SolverContext,
   WebviewToExtMessage,
@@ -21,8 +24,11 @@ export class PanelManager {
   /** 当前会话保存的题目与步骤，用于构建携带完整上下文的请求。 */
   private problem = '';
   private steps: SolutionStep[] = [];
+  private completedPhases: Phase[] = [];
   /** 正在进行的请求，用于取消。 */
   private inflight = new Map<string, AbortController>();
+  /** 来自 webview 的对话线程快照（按 stepId / __global__）。 */
+  private threadSnapshots = new Map<string, ConversationMessage[]>();
 
   private constructor(
     private readonly context: vscode.ExtensionContext,
@@ -94,17 +100,32 @@ export class PanelManager {
       case 'solve':
         this.startSolve(msg.problem);
         break;
+      case 'continueBranch':
+        await this.runContinueBranch(msg);
+        break;
       case 'action':
         await this.runAction(msg);
         break;
       case 'globalAsk':
-        await this.runGlobalAsk(msg.requestId, msg.question);
+        await this.runGlobalAsk(msg.requestId, msg.question, msg.threadMessages);
         break;
       case 'setDifficulty':
         await vscode.workspace
           .getConfiguration('polyaSolver')
           .update('difficulty', msg.difficulty, vscode.ConfigurationTarget.Global);
         this.post({ type: 'difficultyChanged', difficulty: msg.difficulty });
+        break;
+      case 'cancelAction': {
+        const ctrl = this.inflight.get(msg.requestId);
+        if (ctrl) {
+          ctrl.abort();
+          this.inflight.delete(msg.requestId);
+          this.post({ type: 'actionCancelled', requestId: msg.requestId });
+        }
+        break;
+      }
+      case 'reportState':
+        this.completedPhases = msg.completedPhases;
         break;
       case 'copy':
         await vscode.env.clipboard.writeText(msg.text);
@@ -121,21 +142,34 @@ export class PanelManager {
 
   private async solve(problem: string): Promise<void> {
     this.problem = problem;
+    this.steps = [];
     try {
       if (!this.engine) {
         this.engine = await createEngine(this.context);
       }
       const ctx = this.buildContext();
-      const solution = await this.engine.generateSolution(problem, ctx);
+      const solution = await this.engine.generateSolutionStreaming(problem, ctx, {
+        onPhaseStart: (phase) => this.post({ type: 'solutionPhaseStart', phase }),
+        onPhaseSteps: (phase, steps) => {
+          this.steps = [...this.steps, ...steps];
+          this.post({ type: 'solutionPhaseSteps', phase, steps });
+        },
+        onComplete: (sol) => {
+          this.steps = sol.steps;
+          this.post({ type: 'solution', solution: sol });
+        },
+      });
       this.steps = solution.steps;
-      this.post({ type: 'solution', solution });
     } catch (e: any) {
       this.post({ type: 'solveError', message: e?.message ?? String(e) });
     }
   }
 
   private async runAction(msg: Extract<WebviewToExtMessage, { type: 'action' }>): Promise<void> {
-    const { requestId, action, stepId, question } = msg;
+    const { requestId, action, stepId, question, selectedText, threadMessages } = msg;
+    if (threadMessages) {
+      this.threadSnapshots.set(stepId, threadMessages);
+    }
     // 纯前端动作（复制/标记）不会发到这里，这里只处理需要引擎的动作。
     const controller = new AbortController();
     this.inflight.set(requestId, controller);
@@ -149,7 +183,7 @@ export class PanelManager {
       if (!this.engine) {
         this.engine = await createEngine(this.context);
       }
-      const ctx = this.buildContext(stepId);
+      const ctx = this.buildContext(stepId, undefined, selectedText);
       // onMeta 会提前发一次 actionEnd 携带 meta；这里结束再补发一次以收尾。
       let meta;
       const wrapped: StreamHandlers = {
@@ -161,17 +195,53 @@ export class PanelManager {
       if (action === 'verify') {
         await this.engine.checkStep(stepId, ctx, wrapped);
       } else {
-        await this.engine.explainStep(action, stepId, ctx, wrapped, question);
+        await this.engine.explainStep(action, stepId, ctx, wrapped, question, selectedText);
       }
       this.post({ type: 'actionEnd', requestId, meta });
     } catch (e: any) {
-      this.post({ type: 'actionError', requestId, message: e?.message ?? String(e) });
+      if (e?.name === 'AbortError' || controller.signal.aborted) {
+        this.post({ type: 'actionCancelled', requestId });
+      } else {
+        this.post({ type: 'actionError', requestId, message: e?.message ?? String(e) });
+      }
     } finally {
       this.inflight.delete(requestId);
     }
   }
 
-  private async runGlobalAsk(requestId: string, question: string): Promise<void> {
+  private async runContinueBranch(
+    msg: Extract<WebviewToExtMessage, { type: 'continueBranch' }>
+  ): Promise<void> {
+    const { branchId, requestId } = msg;
+    const controller = new AbortController();
+    this.inflight.set(requestId, controller);
+    try {
+      if (!this.engine) {
+        this.engine = await createEngine(this.context);
+      }
+      const ctx = this.buildContext(undefined, msg.branch);
+      const steps = await this.engine.continueBranch(branchId, ctx, {
+        signal: controller.signal,
+        onChunk: () => {},
+      });
+      this.post({ type: 'branchStepsAppended', branchId, steps });
+    } catch (e: any) {
+      if (e?.name !== 'AbortError' && !controller.signal.aborted) {
+        this.post({ type: 'actionError', requestId, message: e?.message ?? String(e) });
+      }
+    } finally {
+      this.inflight.delete(requestId);
+    }
+  }
+
+  private async runGlobalAsk(
+    requestId: string,
+    question: string,
+    threadMessages?: ConversationMessage[]
+  ): Promise<void> {
+    if (threadMessages) {
+      this.threadSnapshots.set('__global__', threadMessages);
+    }
     const controller = new AbortController();
     this.inflight.set(requestId, controller);
     this.post({ type: 'actionStart', requestId, action: 'ask', stepId: '__global__' });
@@ -180,31 +250,50 @@ export class PanelManager {
         this.engine = await createEngine(this.context);
       }
       const ctx = this.buildContext();
+      let meta;
       await this.engine.globalAsk(question, ctx, {
         onChunk: (chunk) => this.post({ type: 'actionChunk', requestId, chunk }),
+        onMeta: (m) => {
+          meta = m;
+        },
         signal: controller.signal,
       });
-      this.post({ type: 'actionEnd', requestId });
+      this.post({ type: 'actionEnd', requestId, meta });
     } catch (e: any) {
-      this.post({ type: 'actionError', requestId, message: e?.message ?? String(e) });
+      if (e?.name === 'AbortError' || controller.signal.aborted) {
+        this.post({ type: 'actionCancelled', requestId });
+      } else {
+        this.post({ type: 'actionError', requestId, message: e?.message ?? String(e) });
+      }
     } finally {
       this.inflight.delete(requestId);
     }
   }
 
-  private buildContext(focusedStepId?: string): SolverContext {
+  private buildContext(
+    focusedStepId?: string,
+    activeBranch?: SolutionBranch,
+    focusedSelection?: string
+  ): SolverContext {
     const cfg = vscode.workspace.getConfiguration('polyaSolver');
     const focusedStep = focusedStepId
-      ? this.steps.find((s) => s.id === focusedStepId)
+      ? findStepInTree(this.steps, focusedStepId)
       : undefined;
     const currentPhase = focusedStep?.phase ?? 'understanding';
+    const threads: SolverContext['conversationThreads'] = {};
+    for (const [key, messages] of this.threadSnapshots) {
+      threads[key] = { stepId: key, messages };
+    }
     return {
       problem: this.problem,
       difficulty: cfg.get<Difficulty>('difficulty', 'standard'),
-      phaseState: { currentPhase, completedPhases: [] },
+      phaseState: { currentPhase, completedPhases: this.completedPhases },
       steps: this.steps,
       focusedStep,
       teacherMode: cfg.get<boolean>('teacherMode', false),
+      conversationThreads: threads,
+      activeBranch,
+      focusedSelection,
     };
   }
 
@@ -222,6 +311,9 @@ export class PanelManager {
     );
     const codiconCssUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'media', 'codicon.css')
+    );
+    const mermaidUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'media', 'mermaid.min.js')
     );
     const csp = [
       `default-src 'none'`,
@@ -244,6 +336,7 @@ export class PanelManager {
 </head>
 <body>
   <div id="root"></div>
+  <script nonce="${nonce}" src="${mermaidUri}"></script>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
@@ -269,4 +362,19 @@ function getNonce(): string {
     text += possible.charAt(Math.floor(Math.random() * possible.length));
   }
   return text;
+}
+
+function findStepInTree(steps: SolutionStep[], id: string): SolutionStep | undefined {
+  for (const s of steps) {
+    if (s.id === id) {
+      return s;
+    }
+    if (s.subSteps) {
+      const f = findStepInTree(s.subSteps, id);
+      if (f) {
+        return f;
+      }
+    }
+  }
+  return undefined;
 }

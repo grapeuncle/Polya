@@ -1,8 +1,10 @@
-// 解题引擎接口抽象。所有具体引擎（Mock / OpenAI / Anthropic）都实现该接口。
+// 解题引擎接口抽象。所有具体引擎（Mock / OpenAI / Anthropic / DeepSeek）都实现该接口。
 import {
   ActionResultMeta,
   MenuActionId,
+  Phase,
   Solution,
+  SolutionStep,
   SolverContext,
 } from '../shared/types';
 
@@ -15,12 +17,34 @@ export interface StreamHandlers {
   signal?: AbortSignal;
 }
 
+/** 分阶段解题流式回调。 */
+export interface SolutionStreamHandlers {
+  onPhaseStart: (phase: Phase) => void;
+  onPhaseSteps: (phase: Phase, steps: SolutionStep[]) => void;
+  onComplete: (solution: Solution) => void;
+  signal?: AbortSignal;
+}
+
 export interface ISolverEngine {
   /** 引擎标识，用于 UI 显示当前使用的引擎。 */
   readonly id: string;
 
   /** 生成完整的波利亚四阶段解题方案。 */
   generateSolution(problem: string, ctx: SolverContext): Promise<Solution>;
+
+  /** 分阶段推送解题步骤（推荐用于 UI 渐进展示）。 */
+  generateSolutionStreaming(
+    problem: string,
+    ctx: SolverContext,
+    handlers: SolutionStreamHandlers
+  ): Promise<Solution>;
+
+  /** 沿分支继续追加解题步骤。 */
+  continueBranch(
+    branchId: string,
+    ctx: SolverContext,
+    handlers: StreamHandlers
+  ): Promise<SolutionStep[]>;
 
   /**
    * 解释某个步骤（如"解释这一步""为什么这样做"等）。
@@ -31,7 +55,8 @@ export interface ISolverEngine {
     stepId: string,
     ctx: SolverContext,
     handlers: StreamHandlers,
-    question?: string
+    question?: string,
+    selectedText?: string
   ): Promise<void>;
 
   /** 检验某个步骤（验算）。复用 explainStep 的流式机制，这里单独暴露以贴合需求接口。 */

@@ -1,109 +1,226 @@
 // 内置 Mock 引擎：无需任何 API 密钥即可体验完整交互流程。
-// 它生成一份示例性的波利亚四阶段解题方案，并对各菜单动作返回有教学意义的占位内容。
-import { ISolverEngine, StreamHandlers } from './ISolverEngine';
+import { ISolverEngine, SolutionStreamHandlers, StreamHandlers } from './ISolverEngine';
 import {
   ActionResultMeta,
   MenuActionId,
+  PHASE_ORDER,
   Solution,
   SolutionStep,
   SolverContext,
 } from '../shared/types';
 
-/** 把一段文本按字符切片，模拟流式输出。 */
 async function streamText(
   text: string,
   handlers: StreamHandlers,
   meta?: ActionResultMeta
 ): Promise<void> {
-  if (meta && handlers.onMeta) {
-    handlers.onMeta(meta);
-  }
   const chunkSize = 12;
   for (let i = 0; i < text.length; i += chunkSize) {
     if (handlers.signal?.aborted) {
       return;
     }
     handlers.onChunk(text.slice(i, i + chunkSize));
-    // 模拟网络/生成延迟，使流式效果可见。
-    await new Promise((r) => setTimeout(r, 18));
+    await new Promise((r) => setTimeout(r, 12));
+  }
+  if (meta && handlers.onMeta) {
+    handlers.onMeta(meta);
   }
 }
 
-export class MockSolverEngine implements ISolverEngine {
-  readonly id = 'mock';
+function pickTemplate(problem: string): 'quadratic' | 'inequality' | 'proof' {
+  const p = problem.toLowerCase();
+  if (/证明|求证|show that|prove/.test(p)) {
+    return 'proof';
+  }
+  if (/不等|≥|≤|>|<|最大|最小|min|max/.test(p)) {
+    return 'inequality';
+  }
+  return 'quadratic';
+}
 
-  async generateSolution(problem: string, _ctx: SolverContext): Promise<Solution> {
-    // 为了演示，无论输入什么题目，都生成一个"解一元二次方程"风格的示例方案。
-    await new Promise((r) => setTimeout(r, 400));
-    const steps: SolutionStep[] = [
+function buildSteps(problem: string, template: ReturnType<typeof pickTemplate>): SolutionStep[] {
+  const shortProblem = problem.slice(0, 120);
+  if (template === 'proof') {
+    return [
       {
         id: 's1',
         phase: 'understanding',
-        content:
-          '阅读题目：求解方程 $x^2 - 5x + 6 = 0$。未知量是 $x$，已知量是二次项、一次项与常数项的系数。',
-        rawLatex: 'x^2 - 5x + 6 = 0',
+        content: `理解题目：${shortProblem}。需明确要证明的命题及其前提条件。`,
         metadata: {
-          objective: '明确我们要找的是满足方程的所有 $x$ 值。',
-          heuristic: '先识别这是一个一元二次方程，标准形式为 $ax^2+bx+c=0$。',
-          commonMistake: '容易忽略二次方程可能有两个解。',
+          objective: '弄清证明目标与可用条件。',
+          commonMistake: '未写清「设」就直接推导，逻辑不严谨。',
         },
       },
       {
         id: 's2',
         phase: 'devising',
-        content:
-          '寻找联系：这是可因式分解的二次方程。回忆"十字相乘/因式分解"方法——寻找两个数，乘积为 $6$、和为 $5$。',
-        metadata: {
-          objective: '选择一条通向解的路径。',
-          heuristic: '看到能凑出整数因子的二次三项式，优先尝试因式分解而非求根公式。',
-          theoremApplied: '因式分解定理',
-          alternativeApproach: '也可使用求根公式 $x=\\frac{-b\\pm\\sqrt{b^2-4ac}}{2a}$。',
-        },
+        content: '拟定方案：考虑从左式化到右式，或构造辅助量/不等式链。',
+        metadata: { objective: '选择证明策略。', heuristic: '常见方法：直接推导、反证、归纳。' },
       },
       {
         id: 's3',
         phase: 'carrying-out',
-        content:
-          '执行：$x^2-5x+6=(x-2)(x-3)=0$。由零积性质，$x-2=0$ 或 $x-3=0$，得 $x=2$ 或 $x=3$。',
-        rawLatex: '(x-2)(x-3)=0',
-        metadata: {
-          objective: '通过因式分解得到方程的根。',
-          heuristic: '$2$ 与 $3$ 满足"积为 6、和为 5"。',
-          theoremApplied: '零积性质：若 $ab=0$，则 $a=0$ 或 $b=0$。',
-          commonMistake: '把"或"误写成"且"，或漏掉一个根。',
-        },
+        content: '执行证明：逐步变形，每一步注明依据（公式/定理）。',
+        metadata: { theoremApplied: '基本代数恒等式' },
         subSteps: [
-          {
-            id: 's3a',
-            phase: 'carrying-out',
-            content: '分解因式：$x^2-5x+6=(x-2)(x-3)$。',
-            metadata: {},
-          },
-          {
-            id: 's3b',
-            phase: 'carrying-out',
-            content: '令每个因式为零：$x-2=0 \\Rightarrow x=2$；$x-3=0 \\Rightarrow x=3$。',
-            metadata: {},
-          },
+          { id: 's3a', phase: 'carrying-out', content: '写出起始表达式。', metadata: {} },
+          { id: 's3b', phase: 'carrying-out', content: '应用恒等变形得到目标式。', metadata: {} },
         ],
       },
       {
         id: 's4',
         phase: 'looking-back',
-        content:
-          '回顾：代回验证 $2^2-5\\cdot2+6=0$、$3^2-5\\cdot3+6=0$ 均成立。两个根之和为 $5$、积为 $6$，与系数（韦达定理）一致。',
-        metadata: {
-          objective: '确认答案正确并加深理解。',
-          heuristic: '用韦达定理快速校验：根之和 $=-b/a$，根之积 $=c/a$。',
-          alternativeApproach: '可推广：任意 $x^2-(p+q)x+pq=0$ 的根为 $p,q$。',
-        },
+        content: '回顾：检查是否用到全部条件，能否推广到更一般情形。',
+        metadata: { objective: '确认证明完整。' },
       },
     ];
-    return {
+  }
+  if (template === 'inequality') {
+    return [
+      {
+        id: 's1',
+        phase: 'understanding',
+        content: `理解题目：${shortProblem}。明确变量范围与求最值的函数。`,
+        metadata: { objective: '确定优化目标与约束。' },
+      },
+      {
+        id: 's2',
+        phase: 'devising',
+        content: '拟定方案：配方、求导或基本不等式 $a^2+b^2\\ge 2ab$。',
+        metadata: { heuristic: '二次函数优先配方找顶点。' },
+      },
+      {
+        id: 's3',
+        phase: 'carrying-out',
+        content: '执行：对函数配方或求导，找到极值点并验证。',
+        metadata: { theoremApplied: '顶点公式 / 导数为零' },
+        subSteps: [
+          { id: 's3a', phase: 'carrying-out', content: '配方或求导。', metadata: {} },
+          { id: 's3b', phase: 'carrying-out', content: '代入极值点求最值。', metadata: {} },
+        ],
+      },
+      {
+        id: 's4',
+        phase: 'looking-back',
+        content: '回顾：检查端点与定义域，确认最值正确。',
+        metadata: { objective: '验证最值。' },
+      },
+    ];
+  }
+  return [
+    {
+      id: 's1',
+      phase: 'understanding',
+      content: `阅读题目：${shortProblem}。识别未知量与方程类型。`,
+      metadata: {
+        objective: '明确求解目标。',
+        heuristic: '标准形式 $ax^2+bx+c=0$。',
+        commonMistake: '忽略方程可能有多个根。',
+      },
+    },
+    {
+      id: 's2',
+      phase: 'devising',
+      content: '拟定方案：尝试因式分解或求根公式。',
+      metadata: {
+        objective: '选择求解路径。',
+        theoremApplied: '因式分解 / 求根公式',
+        alternativeApproach: '配方法',
+      },
+    },
+    {
+      id: 's3',
+      phase: 'carrying-out',
+      content: '执行：分解因式或代入求根公式，得到根。',
+      metadata: {
+        objective: '求出根。',
+        theoremApplied: '零积性质',
+        commonMistake: '漏解或符号错误。',
+      },
+      subSteps: [
+        { id: 's3a', phase: 'carrying-out', content: '因式分解或套公式。', metadata: {} },
+        { id: 's3b', phase: 'carrying-out', content: '解出每个因式对应的根。', metadata: {} },
+      ],
+    },
+    {
+      id: 's4',
+      phase: 'looking-back',
+      content: '回顾：代回验证，并可用韦达定理交叉检验。',
+      metadata: { objective: '确认答案正确。' },
+    },
+  ];
+}
+
+export class MockSolverEngine implements ISolverEngine {
+  readonly id = 'mock';
+
+  async generateSolution(problem: string, ctx: SolverContext): Promise<Solution> {
+    return this.generateSolutionStreaming(problem, ctx, {
+      onPhaseStart: () => {},
+      onPhaseSteps: () => {},
+      onComplete: () => {},
+    });
+  }
+
+  async generateSolutionStreaming(
+    problem: string,
+    _ctx: SolverContext,
+    handlers: SolutionStreamHandlers
+  ): Promise<Solution> {
+    const template = pickTemplate(problem);
+    const steps = buildSteps(problem, template);
+    const byPhase = PHASE_ORDER.map((p) => ({
+      phase: p,
+      steps: steps.filter((s) => s.phase === p),
+    }));
+
+    for (const { phase, steps: phaseSteps } of byPhase) {
+      if (handlers.signal?.aborted) {
+        break;
+      }
+      if (phaseSteps.length === 0) {
+        continue;
+      }
+      handlers.onPhaseStart(phase);
+      await new Promise((r) => setTimeout(r, 280));
+      handlers.onPhaseSteps(phase, phaseSteps);
+    }
+
+    const solution: Solution = {
       problem,
-      finalAnswer: 'x=2 \\text{ 或 } x=3',
+      finalAnswer: template === 'quadratic' ? '请根据具体方程代入验证' : undefined,
       steps,
     };
+    handlers.onComplete(solution);
+    return solution;
+  }
+
+  async continueBranch(
+    branchId: string,
+    ctx: SolverContext,
+    handlers: StreamHandlers
+  ): Promise<SolutionStep[]> {
+    void branchId;
+    void ctx;
+    const extra: SolutionStep[] = [
+      {
+        id: `b-ext-${Date.now()}`,
+        phase: 'carrying-out',
+        content: '沿分支继续：代入数值完成计算。',
+        metadata: { objective: '完成另解路径。' },
+      },
+      {
+        id: `b-ext2-${Date.now()}`,
+        phase: 'looking-back',
+        content: '回顾分支结果并与主路径对比。',
+        metadata: {},
+      },
+    ];
+    await streamText('**分支延续**：已追加后续步骤。', handlers, {
+      branchSteps: extra,
+      branchLabel: '延续',
+    });
+    return extra;
   }
 
   async explainStep(
@@ -111,10 +228,17 @@ export class MockSolverEngine implements ISolverEngine {
     stepId: string,
     ctx: SolverContext,
     handlers: StreamHandlers,
-    question?: string
+    question?: string,
+    selectedText?: string
   ): Promise<void> {
     const step = findStep(ctx.steps, stepId);
-    const { text, meta } = mockActionResult(action, step?.content ?? '该步骤', question);
+    const { text, meta } = mockActionResult(
+      action,
+      step?.content ?? '该步骤',
+      ctx.problem,
+      question,
+      selectedText
+    );
     await streamText(text, handlers, meta);
   }
 
@@ -122,9 +246,10 @@ export class MockSolverEngine implements ISolverEngine {
     return this.explainStep('verify', stepId, ctx, handlers);
   }
 
-  async globalAsk(question: string, _ctx: SolverContext, handlers: StreamHandlers): Promise<void> {
+  async globalAsk(question: string, ctx: SolverContext, handlers: StreamHandlers): Promise<void> {
+    const hist = ctx.conversationThreads?.['__global__']?.messages.length ?? 0;
     await streamText(
-      `（示例引擎回答）关于你的问题"${question}"：这是 Mock 引擎的占位回答。配置真实 API 密钥后，将由大模型结合整道题上下文作答。`,
+      `关于「${question}」（Mock 引擎，已有 ${hist} 轮对话）：结合题目「${ctx.problem.slice(0, 40)}…」，核心是理解波利亚四阶段——先弄清已知未知，再选策略，逐步执行并回顾验证。配置真实 API 后回答会更精准。`,
       handlers
     );
   }
@@ -145,110 +270,263 @@ function findStep(steps: SolutionStep[], id: string): SolutionStep | undefined {
   return undefined;
 }
 
-/** 针对不同动作返回示例文本与渲染元信息。 */
 function mockActionResult(
   action: MenuActionId,
   content: string,
-  question?: string
+  problem: string,
+  question?: string,
+  selectedText?: string
 ): { text: string; meta?: ActionResultMeta } {
+  const selection = selectedText?.trim();
+  const selectionNote = selection ? `\n\n**划选片段**：「${selection}」` : '';
   switch (action) {
     case 'explain':
-      return {
-        text: `**通俗解释**：这一步其实就是把"${content}"用更直白的话说清楚——我们在一步步靠近答案。每个符号都有它的来历，别被公式吓到。`,
-      };
+      if (selection) {
+        return {
+          text: `**划选解释**：针对「${selection}」—— 这是步骤中的一个关键片段，在把已知条件一步步变成答案的过程中起重要作用。${selectionNote}`,
+        };
+      }
+      return { text: `**通俗解释**：${content} —— 用日常语言说，就是在把已知条件一步步变成答案。` };
     case 'objective':
-      return { text: '**这一步的目的**：为后续推导铺路，缩小未知量的范围。' };
+      return { text: '**这一步的目的**：为后续推导铺路。' };
     case 'why':
-      return {
-        text: '**为什么这样做**：因为前一步已经给出了关键条件，沿着这个方向走能最自然地连接已知与未知。',
-      };
+      return { text: '**为什么这样做**：前序步骤已建立关键联系，沿此方向最自然。' };
     case 'detail':
       return {
-        text: '**详细推导**：\n1. 写出当前表达式。\n2. 应用对应法则变形。\n3. 整理得到结果。\n\n$$x^2-5x+6=(x-2)(x-3)$$',
+        text: '**详细推导**（可点击微步骤）',
+        meta: {
+          microSteps: [
+            { id: 'm1', label: '写出式子', content: '从已知条件列出方程。', op: '列式' },
+            { id: 'm2', label: '变形', content: '移项并合并同类项。', op: '移项' },
+            { id: 'm3', label: '得结果', content: '解出未知量。', op: '求解' },
+          ],
+        },
       };
     case 'alternatives':
       return {
-        text: '**两种方法对比**：\n\n| 方法 | 思路 | 优点 | 缺点 |\n| --- | --- | --- | --- |\n| 因式分解 | 凑因子 | 快、直观 | 系数不整时困难 |\n| 求根公式 | 套公式 | 通用 | 计算量稍大 |',
-        meta: { kind: 'comparison', title: '替代方法对比' },
+        text: '**两种方法对比**',
+        meta: {
+          kind: 'comparison',
+          title: '替代方法对比',
+          comparison: {
+            columns: ['方法', '思路', '优点', '缺点'],
+            rows: [
+              ['法 A', '直接推导', '快', '需技巧'],
+              ['法 B', '换元/公式', '通用', '计算多'],
+            ],
+          },
+        },
       };
     case 'verify':
       return {
-        text: '**验算**：代入 $x=2$：$2^2-5\\cdot2+6=4-10+6=0$ ✓；代入 $x=3$：$9-15+6=0$ ✓。结果正确。',
+        text: '**验算**：代入特殊值检验，结果一致 ✓',
         meta: { kind: 'text', title: '检验这一步' },
       };
-    case 'ask':
+    case 'commonMistake':
       return {
-        text: `（示例引擎回答）针对你的追问"${question ?? ''}"：配置真实模型后这里会给出贴合上下文的解答。`,
+        text: '**常见错误**：跳步、符号弄反、漏掉约束条件。',
+        meta: { kind: 'warning', title: '常见错误' },
       };
-    case 'breakdown':
-      return { text: '**逐句拆解**：\n- "求解方程"→ 要找未知数的值。\n- "$x^2-5x+6=0$"→ 这是一个一元二次方程。' };
+    case 'ask':
+      if (selection) {
+        return {
+          text: `针对划选「${selection}」的提问「${question ?? ''}」：Mock 引擎结合当前步骤上下文作答。${selectionNote}`,
+        };
+      }
+      return {
+        text: `针对「${question ?? ''}」：Mock 引擎结合当前步骤「${content.slice(0, 30)}…」的解答。多轮对话已启用。`,
+      };
+    case 'breakdown': {
+      const parts = problem.split(/[。；;，,]/).filter((p) => p.trim());
+      const sentences = (parts.length > 0 ? parts : [problem]).map((text, i) => ({
+        text: text.trim(),
+        role: (['given', 'unknown', 'constraint', 'goal'] as const)[i % 4],
+        note: 'Mock 解读：该句提供解题信息。',
+      }));
+      return {
+        text: '**逐句拆解题干**',
+        meta: { breakdown: { sentences } },
+      };
+    }
     case 'visualize':
       return {
-        text: '```mermaid\ngraph TD\n  A[原方程 x²-5x+6=0] --> B[因式分解]\n  B --> C[(x-2)(x-3)=0]\n  C --> D[x=2]\n  C --> E[x=3]\n```',
-        meta: { kind: 'mermaid', title: '可视化' },
+        text: '**抛物线与根的示意**（$y=x^2-5x+6$ 与 $x$ 轴交点）',
+        meta: {
+          kind: 'mermaid',
+          title: '可视化',
+          viz: {
+            kind: 'svg',
+            svg: {
+              width: 400,
+              height: 280,
+              elements: [
+                { type: 'axis', x: 40, y: 220, length: 320, direction: 'x', label: 'x' },
+                { type: 'axis', x: 40, y: 220, length: 180, direction: 'y', label: 'y' },
+                { type: 'label', x: 180, y: 30, text: 'y = x² - 5x + 6' },
+                { type: 'point', x: 120, y: 220, label: 'x=2' },
+                { type: 'point', x: 200, y: 220, label: 'x=3' },
+                {
+                  type: 'polygon',
+                  points: '60,200 120,80 200,60 340,180 340,220 60,220',
+                  fill: 'rgba(59,130,246,0.12)',
+                  stroke: '#3b82f6',
+                },
+              ],
+            },
+          },
+        },
       };
     case 'restate':
-      return { text: '**用我自己的话**：就是要找出哪些数代进这个式子能让它等于 0。' };
-    case 'keyInfo':
       return {
-        text: '**关键信息**：\n- 已知量：系数 $1,-5,6$\n- 未知量：$x$\n- 约束：方程等于 $0$',
+        text: `**用我自己的话**：${problem.slice(0, 80)} —— 就是要找出满足条件的答案。`,
+        meta: { kind: 'restate', title: '重述题目' },
       };
+    case 'keyInfo':
+      return { text: '**关键信息**：已知量、未知量、约束条件见题目。' };
     case 'similarProblem':
-      return { text: '**类似题目**：求解 $x^2-7x+12=0$。（先别看解法，试试类比！）' };
+      return { text: '**类似题目**：结构相同、数字不同的练习题（不含解法）。' };
     case 'strategyOrigin':
-      return { text: '**思路来源**：看到可凑整数因子的二次三项式，自然联想到因式分解。' };
+      return { text: '**思路来源**：从题目结构联想到熟悉的模型或公式。' };
     case 'failedPaths':
-      return { text: '**常见弯路**：有人会先两边开方，但 $x^2-5x+6$ 不是完全平方，这条路走不通。' };
+      return { text: '**常见弯路**：选错方法或忽略定义域，导致无法继续。' };
     case 'relatedModel':
-      return { text: '**题型归类**：一元二次方程求根，标准框架是"判别式 → 选择方法 → 求根 → 验证"。' };
+      return { text: '**题型归类**：识别模型后套用标准框架。' };
     case 'subGoals':
       return {
-        text: '```mermaid\nflowchart LR\n  A[识别方程类型] --> B[选择求解方法]\n  B --> C[求出根]\n  C --> D[验证根]\n  style B fill:#88f\n```',
-        meta: { kind: 'mermaid', title: '子目标图' },
+        text: '**子目标分解**',
+        meta: {
+          kind: 'mermaid',
+          title: '子目标图',
+          subGoals: [
+            { id: 'g1', label: '理解', stepIds: ['s1'] },
+            { id: 'g2', label: '拟定', stepIds: ['s2'] },
+            { id: 'g3', label: '执行', stepIds: ['s3'] },
+            { id: 'g4', label: '回顾', stepIds: ['s4'] },
+          ],
+          viz: {
+            kind: 'mermaid',
+            mermaid: 'flowchart LR\n  A[理解] --> B[拟定] --> C[执行] --> D[回顾]',
+          },
+        },
       };
     case 'guessThenProve':
-      return { text: '**先猜后证**：猜测两根可能是小整数（因为常数项 6 较小）；再用因式分解验证 $2,3$。' };
+      return { text: '**先猜后证**：先估计答案形式，再严格推导验证。' };
     case 'expandAlgebra':
       return {
-        text: '**最小操作单元**：\n1. 展开目标因子形式。\n2. 比较系数。\n3. 解出待定因子。',
+        text: '**最小操作单元**',
+        meta: {
+          microSteps: [
+            { id: 'a1', label: '移项', content: '将常数项移到等式右边。', op: '移项' },
+            { id: 'a2', label: '合并', content: '合并同类项。', op: '合并' },
+            { id: 'a3', label: '化简', content: '得到最简形式。', op: '化简' },
+          ],
+        },
       };
     case 'checkCalculation':
-      return { text: '**计算检查**：$(x-2)(x-3)=x^2-5x+6$，展开无误。' };
+      return {
+        text: '**计算检查**：第 2 步符号可能有问题。',
+        meta: {
+          kind: 'warning',
+          highlights: [{ target: 'line', lineIndex: 1, message: '符号弄反' }],
+        },
+      };
     case 'theoremUsed':
       return {
-        text: '**用到的定理**：零积性质——若 $ab=0$，则 $a=0$ 或 $b=0$。前提：在实数（或整环）范围内成立。',
+        text: '**定理与前提**',
+        meta: {
+          theoremCheck: [
+            {
+              name: '因式分解 / 求根公式',
+              prerequisites: ['方程为标准二次式', '系数为实数'],
+              satisfied: true,
+              note: '本题满足全部前提。',
+            },
+          ],
+        },
       };
     case 'tweakParams':
       return {
-        text: '**改参数试试**：若常数项改为 $8$（即 $x^2-5x+8=0$），判别式 $25-32<0$，则无实根。',
+        text: '**参数影响**：拖动滑块观察判别式变化。',
+        meta: {
+          params: [
+            {
+              name: 'c',
+              label: '常数项 c',
+              min: -5,
+              max: 15,
+              step: 1,
+              default: 6,
+              expression: 'x^2 - 5x + {c} = 0,\\; \\Delta = 25 - 4c',
+            },
+          ],
+        },
+      };
+    case 'tweakParamsEval':
+      return {
+        text: `**参数解读**（${question ?? '当前值'}）：判别式随常数项变化，影响根的数量。`,
       };
     case 'branchAlternative':
       return {
-        text: '**另解（求根公式）**：$x=\\frac{5\\pm\\sqrt{25-24}}{2}=\\frac{5\\pm1}{2}$，得 $x=3$ 或 $x=2$，与因式分解一致。',
-        meta: { kind: 'comparison', title: '另解延续' },
+        text: '**另解（求根公式）**',
+        meta: {
+          kind: 'comparison',
+          title: '另解延续',
+          branchLabel: '求根公式法',
+          branchSteps: [
+            {
+              id: 'b1',
+              phase: 'carrying-out',
+              content: '使用求根公式 $x=\\frac{-b\\pm\\sqrt{b^2-4ac}}{2a}$。',
+              metadata: {},
+            },
+            {
+              id: 'b2',
+              phase: 'carrying-out',
+              content: '代入系数计算两根。',
+              metadata: {},
+            },
+          ],
+        },
       };
     case 'verifyAnswer':
-      return { text: '**验证答案**：$x=2,3$ 代回原方程均得 $0$，答案正确。' };
+      return { text: '**验证答案**：代回原题，等式成立。' };
     case 'allSolutions':
       return {
-        text: '**多种解法**：\n\n| 解法 | 关键步骤 |\n| --- | --- |\n| 因式分解 | 凑 $(x-2)(x-3)$ |\n| 求根公式 | 套 $\\frac{-b\\pm\\sqrt{\\Delta}}{2a}$ |\n| 配方法 | $(x-\\tfrac52)^2=\\tfrac14$ |',
-        meta: { kind: 'comparison', title: '解法并排比较' },
+        text: '**多种解法比较**',
+        meta: {
+          kind: 'comparison',
+          title: '解法并排比较',
+          comparison: {
+            columns: ['解法', '关键步骤', '适用场景'],
+            rows: [
+              ['因式分解', '凑因子', '系数较整'],
+              ['求根公式', '套公式', '通用'],
+              ['配方法', '配方', '需配方技巧'],
+            ],
+          },
+        },
       };
     case 'generalize':
-      return { text: '**推广**：若把常数项改为 $k$，讨论判别式 $25-4k$ 的符号即可判断实根个数。' };
-    case 'takeaway':
       return {
-        text: '**这道题教会我们**：遇到二次方程先看能否因式分解；并养成"求解后代回验证"的习惯。',
-        meta: { kind: 'text', title: '收获总结' },
+        text: '**推广变式**',
+        meta: {
+          variantProblem: '若将常数项改为 12，方程变为 x² - 5x + 12 = 0，求根情况如何？',
+          variantNote: '改变了常数项 c，需重新计算判别式。',
+          kind: 'practice',
+        },
       };
+    case 'takeaway':
+      return { text: '**收获**：理解模型、规范步骤、养成验证习惯。' };
     case 'generatePractice':
       return {
-        text: '**同类练习**：求解 $x^2-6x+8=0$。\n答案要点：因式分解为 $(x-2)(x-4)=0$，得 $x=2$ 或 $x=4$。',
-        meta: { kind: 'practice', title: '生成的练习' },
+        text: '**同类练习**',
+        meta: {
+          kind: 'practice',
+          title: '生成的练习',
+          practiceProblem: '求解 x^2 - 7x + 12 = 0',
+        },
       };
-    case 'copy':
-    case 'flag':
     default:
-      return { text: '（该操作由前端处理或暂无示例内容。）' };
+      return { text: '（Mock 占位内容）' };
   }
 }

@@ -7,6 +7,7 @@ export const GlobalAsk: React.FC = () => {
   const setOpen = usePolyaStore((s) => s.setGlobalAskOpen);
   const runGlobalAsk = usePolyaStore((s) => s.runGlobalAsk);
   const hasSolution = usePolyaStore((s) => s.steps.length > 0);
+  const threads = usePolyaStore((s) => s.threads['__global__']?.messages ?? []);
   const [text, setText] = useState('');
 
   if (!hasSolution) {
@@ -25,6 +26,19 @@ export const GlobalAsk: React.FC = () => {
       {open && (
         <div className="global-ask-popup">
           <div className="panel-title">全局提问</div>
+          {threads.length > 0 && (
+            <details className="thread-history">
+              <summary>对话历史（{threads.length}）</summary>
+              <ul>
+                {threads.slice(-4).map((m, i) => (
+                  <li key={i}>
+                    <strong>{m.role === 'user' ? '我' : '老师'}：</strong>
+                    {m.content.slice(0, 100)}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
           <textarea
             autoFocus
             placeholder="对整道题有疑问？例如：这道题的核心思想是什么？"

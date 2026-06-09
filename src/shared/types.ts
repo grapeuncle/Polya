@@ -24,6 +24,14 @@ export const PHASE_META: Record<Phase, { title: string; subtitle: string; emoji:
   'looking-back': { title: '回顾反思', subtitle: '检验结果并总结推广', emoji: '🔭' },
 };
 
+/** 定理前提检查项。 */
+export interface TheoremCheckItem {
+  name: string;
+  prerequisites: string[];
+  satisfied: boolean;
+  note?: string;
+}
+
 /** 单个解题步骤的元数据。 */
 export interface StepMetadata {
   /** 该步骤的目的。 */
@@ -36,6 +44,45 @@ export interface StepMetadata {
   commonMistake?: string;
   /** 替代解法简述。 */
   alternativeApproach?: string;
+  /** 定理前提检查（AI 补全）。 */
+  theoremCheck?: TheoremCheckItem[];
+}
+
+/** 题干拆解句。 */
+export interface BreakdownSentence {
+  text: string;
+  role: 'given' | 'unknown' | 'constraint' | 'goal' | 'hint';
+  note?: string;
+}
+
+/** 代数微步骤单元。 */
+export interface MicroStep {
+  id: string;
+  label: string;
+  content: string;
+  op?: string;
+}
+
+/** 验算高亮项。 */
+export interface VerifyHighlight {
+  target: 'step' | 'line';
+  lineIndex?: number;
+  message: string;
+}
+
+/** 子目标节点。 */
+export interface SubGoal {
+  id: string;
+  label: string;
+  stepIds?: string[];
+}
+
+/** 学习要点收藏。 */
+export interface LearningEntry {
+  id: string;
+  content: string;
+  time: number;
+  stepId?: string;
 }
 
 /** 解题步骤数据结构（核心模型）。 */
@@ -74,6 +121,61 @@ export interface PhaseState {
   completedPhases: Phase[];
 }
 
+/** SVG 可视化元素。 */
+export type SvgElement =
+  | { type: 'line'; x1: number; y1: number; x2: number; y2: number; stroke?: string }
+  | { type: 'circle'; cx: number; cy: number; r: number; fill?: string; stroke?: string }
+  | { type: 'point'; x: number; y: number; label?: string }
+  | { type: 'axis'; x: number; y: number; length: number; direction: 'x' | 'y'; label?: string }
+  | { type: 'label'; x: number; y: number; text: string }
+  | { type: 'polygon'; points: string; fill?: string; stroke?: string };
+
+/** 可视化规格。 */
+export interface VizSpec {
+  kind: 'svg' | 'mermaid' | 'table';
+  svg?: { width: number; height: number; elements: SvgElement[] };
+  table?: { headers: string[]; rows: string[][] };
+  mermaid?: string;
+}
+
+/** 并排比较规格。 */
+export interface ComparisonSpec {
+  columns: string[];
+  rows: string[][];
+}
+
+/** 参数滑块规格。 */
+export interface ParamSpec {
+  name: string;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  default: number;
+  expression: string;
+}
+
+/** 对话消息。 */
+export interface ConversationMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  time: number;
+}
+
+/** 多轮对话线程。 */
+export interface ConversationThread {
+  stepId: string;
+  messages: ConversationMessage[];
+}
+
+/** 解法分支。 */
+export interface SolutionBranch {
+  id: string;
+  parentStepId: string;
+  label: string;
+  alternativeSteps: SolutionStep[];
+}
+
 /**
  * 菜单动作类型。通用动作在任意步骤可用；阶段专属动作仅在对应阶段显示。
  * 命名与需求文档中的按钮一一对应。
@@ -89,6 +191,7 @@ export type MenuActionId =
   | 'ask'
   | 'copy'
   | 'flag'
+  | 'commonMistake'
   // 理解题目
   | 'breakdown'
   | 'visualize'
@@ -106,6 +209,7 @@ export type MenuActionId =
   | 'checkCalculation'
   | 'theoremUsed'
   | 'tweakParams'
+  | 'tweakParamsEval'
   | 'branchAlternative'
   // 回顾反思
   | 'verifyAnswer'
@@ -125,6 +229,12 @@ export interface SolverContext {
   focusedStep?: SolutionStep;
   /** 教师模式下是否隐藏部分内容。 */
   teacherMode?: boolean;
+  /** 多轮对话历史（按 stepId 或 __global__）。 */
+  conversationThreads?: Record<string, ConversationThread>;
+  /** 当前继续求解的分支（continueBranch）。 */
+  activeBranch?: SolutionBranch;
+  /** 学生在步骤内划选的文本片段（若有）。 */
+  focusedSelection?: string;
 }
 
 // ============== Webview -> Extension 消息 ==============
@@ -132,17 +242,21 @@ export interface SolverContext {
 export type WebviewToExtMessage =
   | { type: 'ready' }
   | { type: 'solve'; problem: string }
+  | { type: 'continueBranch'; branchId: string; requestId: string; branch: SolutionBranch }
   | {
       type: 'action';
       requestId: string;
       action: MenuActionId;
       stepId: string;
-      /** 追问 / 全局提问的自由文本。 */
       question?: string;
+      selectedText?: string;
+      threadMessages?: ConversationMessage[];
     }
-  | { type: 'globalAsk'; requestId: string; question: string }
+  | { type: 'globalAsk'; requestId: string; question: string; threadMessages?: ConversationMessage[] }
   | { type: 'setDifficulty'; difficulty: Difficulty }
   | { type: 'copy'; text: string }
+  | { type: 'cancelAction'; requestId: string }
+  | { type: 'reportState'; completedPhases: Phase[] }
   | { type: 'info'; message: string }
   | { type: 'error'; message: string }
   | { type: 'requestState' };
@@ -152,18 +266,35 @@ export type WebviewToExtMessage =
 export type ExtToWebviewMessage =
   | { type: 'init'; difficulty: Difficulty; teacherMode: boolean; engine: string }
   | { type: 'solutionStart'; problem: string }
+  | { type: 'solutionPhaseStart'; phase: Phase }
+  | { type: 'solutionPhaseSteps'; phase: Phase; steps: SolutionStep[] }
   | { type: 'solution'; solution: Solution }
   | { type: 'solveError'; message: string }
+  | { type: 'branchStepsAppended'; branchId: string; steps: SolutionStep[] }
   // 流式动作结果：先 start，再多次 chunk，最后 end / error。
   | { type: 'actionStart'; requestId: string; action: MenuActionId; stepId: string }
   | { type: 'actionChunk'; requestId: string; chunk: string }
   | { type: 'actionEnd'; requestId: string; meta?: ActionResultMeta }
   | { type: 'actionError'; requestId: string; message: string }
+  | { type: 'actionCancelled'; requestId: string }
   | { type: 'difficultyChanged'; difficulty: Difficulty };
 
 /** 动作结果的附加结构化信息（用于渲染特殊卡片，如可视化、对比等）。 */
 export interface ActionResultMeta {
   /** 渲染样式：普通文本卡片 / Mermaid 图 / 对比表 / 高亮等。 */
-  kind?: 'text' | 'mermaid' | 'comparison' | 'warning' | 'practice';
+  kind?: 'text' | 'mermaid' | 'comparison' | 'warning' | 'practice' | 'restate' | 'svg';
   title?: string;
+  viz?: VizSpec;
+  comparison?: ComparisonSpec;
+  params?: ParamSpec[];
+  practiceProblem?: string;
+  branchSteps?: SolutionStep[];
+  branchLabel?: string;
+  breakdown?: { sentences: BreakdownSentence[] };
+  microSteps?: MicroStep[];
+  highlights?: VerifyHighlight[];
+  theoremCheck?: TheoremCheckItem[];
+  subGoals?: SubGoal[];
+  variantProblem?: string;
+  variantNote?: string;
 }

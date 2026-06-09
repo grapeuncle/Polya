@@ -22,6 +22,7 @@ export const COMMON_ACTIONS: MenuItemConfig[] = [
   { id: 'detail', label: '查看详细推导', icon: 'list-tree', tip: '展开逐步推导' },
   { id: 'alternatives', label: '还有其他方法吗', icon: 'git-branch', tip: '给出替代处理并对比' },
   { id: 'verify', label: '检验这一步', icon: 'check', tip: '快速验算此步' },
+  { id: 'commonMistake', label: '常见错误', icon: 'warning', tip: '如果做错了会怎样' },
   { id: 'ask', label: '提问 / 追问', icon: 'mention', tip: '就此步骤提问', needsInput: true },
   { id: 'copy', label: '复制', icon: 'copy', tip: '复制内容到剪贴板', frontendOnly: true },
   { id: 'flag', label: '标记疑难', icon: 'bookmark', tip: '标记为疑难步骤', frontendOnly: true },

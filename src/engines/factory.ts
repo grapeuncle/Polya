@@ -44,6 +44,14 @@ export async function createEngine(
         model: cfg.get<string>('anthropic.model', 'claude-3-5-sonnet-latest'),
       });
     }
+    if (engine === 'deepseek') {
+      return new LLMSolverEngine({
+        provider: 'deepseek',
+        apiKey,
+        baseUrl: cfg.get<string>('deepseek.baseUrl', 'https://api.deepseek.com/v1'),
+        model: cfg.get<string>('deepseek.model', 'deepseek-chat'),
+      });
+    }
   } catch (e: any) {
     vscode.window.showWarningMessage(
       `Polya：${e.message ?? '引擎初始化失败'}，已临时切换为内置示例引擎。`

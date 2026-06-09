@@ -1,34 +1,56 @@
-// 渲染 Mermaid 图：从 CDN 动态加载 mermaid（保持插件体积小），失败时回退显示源码。
+// 渲染 Mermaid 图：优先使用 Panel 注入的本地脚本，CDN 作 fallback。
 import React, { useEffect, useRef, useState } from 'react';
 
 declare global {
   interface Window {
-    mermaid?: any;
+    mermaid?: {
+      initialize: (cfg: object) => void;
+      render: (id: string, code: string) => Promise<{ svg: string }>;
+    };
   }
 }
 
-let loaderPromise: Promise<any> | null = null;
+let loaderPromise: Promise<void> | null = null;
 
-/** 动态加载 mermaid（仅加载一次）。 */
-function loadMermaid(): Promise<any> {
+function loadMermaid(): Promise<void> {
   if (window.mermaid) {
-    return Promise.resolve(window.mermaid);
+    window.mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+    return Promise.resolve();
   }
   if (loaderPromise) {
     return loaderPromise;
   }
   loaderPromise = new Promise((resolve, reject) => {
+    const waitForInjected = () => {
+      if (window.mermaid) {
+        window.mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+        resolve();
+        return true;
+      }
+      return false;
+    };
+    if (waitForInjected()) {
+      return;
+    }
+    const existing = document.querySelector('script[data-polya-mermaid]');
+    if (existing) {
+      existing.addEventListener('load', () => waitForInjected() || resolve());
+      existing.addEventListener('error', () => reject(new Error('mermaid 加载失败')));
+      setTimeout(() => waitForInjected() || undefined, 300);
+      return;
+    }
     const script = document.createElement('script');
+    script.dataset.polyaMermaid = '1';
     script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
     script.onload = () => {
       if (window.mermaid) {
         window.mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
-        resolve(window.mermaid);
+        resolve();
       } else {
-        reject(new Error('mermaid 加载失败'));
+        reject(new Error('mermaid 未就绪'));
       }
     };
-    script.onerror = () => reject(new Error('无法从 CDN 加载 mermaid'));
+    script.onerror = () => reject(new Error('无法加载 mermaid'));
     document.head.appendChild(script);
   });
   return loaderPromise;
@@ -42,28 +64,24 @@ export const Mermaid: React.FC<{ code: string }> = ({ code }) => {
 
   useEffect(() => {
     let cancelled = false;
-    loadMermaid()
-      .then(async (mermaid) => {
-        if (cancelled || !ref.current) {
+    const run = async () => {
+      try {
+        await loadMermaid();
+        if (cancelled || !ref.current || !window.mermaid) {
           return;
         }
         const id = `mmd-${renderSeq++}`;
-        try {
-          const { svg } = await mermaid.render(id, code);
-          if (!cancelled && ref.current) {
-            ref.current.innerHTML = svg;
-          }
-        } catch (e: any) {
-          if (!cancelled) {
-            setError(e?.message ?? '渲染失败');
-          }
+        const { svg } = await window.mermaid.render(id, code);
+        if (!cancelled && ref.current) {
+          ref.current.innerHTML = svg;
         }
-      })
-      .catch((e) => {
+      } catch (e: unknown) {
         if (!cancelled) {
-          setError(e?.message ?? '加载失败');
+          setError(e instanceof Error ? e.message : '渲染失败');
         }
-      });
+      }
+    };
+    run();
     return () => {
       cancelled = true;
     };

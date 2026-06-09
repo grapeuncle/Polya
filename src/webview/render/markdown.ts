@@ -56,12 +56,16 @@ export function renderMarkdown(input: string): string {
   if (!input) {
     return '';
   }
-  const { text, tokens } = extractMath(input);
-  let html = marked.parse(text, { async: false }) as string;
-  for (const t of tokens) {
-    html = html.replace(t.placeholder, renderTex(t.tex, t.display));
+  try {
+    const { text, tokens } = extractMath(input);
+    let html = marked.parse(text, { async: false }) as string;
+    for (const t of tokens) {
+      html = html.replace(t.placeholder, renderTex(t.tex, t.display));
+    }
+    return html;
+  } catch {
+    return `<p>${escapeHtml(input)}</p>`;
   }
-  return html;
 }
 
 /** 从 Markdown 文本中提取首个 mermaid 代码块（若有）。 */

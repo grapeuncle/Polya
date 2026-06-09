@@ -1,20 +1,25 @@
-// 调用真实大模型（OpenAI / Anthropic 兼容接口）的解题引擎，支持流式响应。
+// 调用真实大模型（OpenAI / Anthropic / DeepSeek 兼容接口）的解题引擎，支持流式响应。
 // 使用全局 fetch（Node 18+ / VS Code 内置）。
-import { ISolverEngine, StreamHandlers } from './ISolverEngine';
+import { ISolverEngine, SolutionStreamHandlers, StreamHandlers } from './ISolverEngine';
 import {
   MenuActionId,
+  PHASE_ORDER,
   Solution,
   SolutionStep,
   SolverContext,
 } from '../shared/types';
+import { parseActionOutput } from './parseActionOutput';
+import { parsePhaseSteps, parseSolution } from './parseSolution';
 import {
   SYSTEM_PROMPT,
   buildActionPrompt,
+  buildContinueBranchPrompt,
   buildGlobalAskPrompt,
+  buildPhaseSolutionPrompt,
   buildSolutionPrompt,
 } from './prompts';
 
-export type LLMProvider = 'openai' | 'anthropic';
+export type LLMProvider = 'openai' | 'anthropic' | 'deepseek';
 
 export interface LLMConfig {
   provider: LLMProvider;
@@ -34,14 +39,86 @@ export class LLMSolverEngine implements ISolverEngine {
   }
 
   async generateSolution(problem: string, ctx: SolverContext): Promise<Solution> {
-    const prompt = buildSolutionPrompt(problem, ctx.difficulty);
+    return this.generateSolutionStreaming(problem, ctx, {
+      onPhaseStart: () => {},
+      onPhaseSteps: () => {},
+      onComplete: () => {},
+    });
+  }
+
+  async generateSolutionStreaming(
+    problem: string,
+    ctx: SolverContext,
+    handlers: SolutionStreamHandlers
+  ): Promise<Solution> {
+    const allSteps: SolutionStep[] = [];
+    let finalAnswer: string | undefined;
+
+    for (const phase of PHASE_ORDER) {
+      if (handlers.signal?.aborted) {
+        break;
+      }
+      handlers.onPhaseStart(phase);
+      const prompt = buildPhaseSolutionPrompt(problem, phase, ctx.difficulty, allSteps);
+      let raw = '';
+      await this.streamChat(SYSTEM_PROMPT, prompt, {
+        onChunk: (c) => {
+          raw += c;
+        },
+        signal: handlers.signal,
+      });
+      const phaseSteps = parsePhaseSteps(raw, phase);
+      if (phaseSteps.length === 0) {
+        continue;
+      }
+      allSteps.push(...phaseSteps);
+      handlers.onPhaseSteps(phase, phaseSteps);
+
+      try {
+        const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+        const jsonText = fence ? fence[1] : raw;
+        const start = jsonText.indexOf('{');
+        const end = jsonText.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+          const obj = JSON.parse(jsonText.slice(start, end + 1));
+          if (obj.finalAnswer) {
+            finalAnswer = obj.finalAnswer;
+          }
+        }
+      } catch {
+        // ignore parse errors for finalAnswer
+      }
+    }
+
+    const solution: Solution = { problem, steps: allSteps, finalAnswer };
+    handlers.onComplete(solution);
+    return solution;
+  }
+
+  async continueBranch(
+    _branchId: string,
+    ctx: SolverContext,
+    handlers: StreamHandlers
+  ): Promise<SolutionStep[]> {
+    const branchSteps =
+      ctx.activeBranch?.alternativeSteps ??
+      ctx.steps.filter((s) => s.phase === 'carrying-out').slice(-2);
+    const label = ctx.activeBranch?.label ?? '另解分支';
+    const prompt = buildContinueBranchPrompt(label, branchSteps, ctx);
     let raw = '';
     await this.streamChat(SYSTEM_PROMPT, prompt, {
       onChunk: (c) => {
         raw += c;
+        handlers.onChunk(c);
       },
+      signal: handlers.signal,
     });
-    return parseSolution(raw, problem);
+    const { meta } = parseActionOutput('branchAlternative', raw);
+    const steps = meta.branchSteps ?? [];
+    if (handlers.onMeta) {
+      handlers.onMeta(meta);
+    }
+    return steps;
   }
 
   async explainStep(
@@ -49,14 +126,15 @@ export class LLMSolverEngine implements ISolverEngine {
     stepId: string,
     ctx: SolverContext,
     handlers: StreamHandlers,
-    question?: string
+    question?: string,
+    selectedText?: string
   ): Promise<void> {
     const step = findStep(ctx.steps, stepId);
     if (!step) {
       throw new Error('找不到对应的步骤。');
     }
-    const prompt = buildActionPrompt(action, step, ctx, question);
-    await this.streamChat(SYSTEM_PROMPT, prompt, handlers);
+    const prompt = buildActionPrompt(action, step, ctx, question, selectedText);
+    await this.streamChatWithMeta(SYSTEM_PROMPT, prompt, action, handlers);
   }
 
   async checkStep(stepId: string, ctx: SolverContext, handlers: StreamHandlers): Promise<void> {
@@ -65,7 +143,29 @@ export class LLMSolverEngine implements ISolverEngine {
 
   async globalAsk(question: string, ctx: SolverContext, handlers: StreamHandlers): Promise<void> {
     const prompt = buildGlobalAskPrompt(question, ctx);
-    await this.streamChat(SYSTEM_PROMPT, prompt, handlers);
+    await this.streamChatWithMeta(SYSTEM_PROMPT, prompt, 'ask', handlers);
+  }
+
+  /** 流式输出并在结束时解析结构化 meta。 */
+  private async streamChatWithMeta(
+    system: string,
+    user: string,
+    action: MenuActionId,
+    handlers: StreamHandlers
+  ): Promise<void> {
+    let raw = '';
+    const wrapped: StreamHandlers = {
+      ...handlers,
+      onChunk: (chunk) => {
+        raw += chunk;
+        handlers.onChunk(chunk);
+      },
+    };
+    await this.streamChat(system, user, wrapped);
+    const { meta } = parseActionOutput(action, raw);
+    if (handlers.onMeta) {
+      handlers.onMeta(meta);
+    }
   }
 
   /** 根据 provider 分发到对应的流式实现。 */
@@ -193,41 +293,4 @@ function findStep(steps: SolutionStep[], id: string): SolutionStep | undefined {
     }
   }
   return undefined;
-}
-
-/** 从模型返回中解析 JSON 解题方案；容错处理代码块包裹与多余文本。 */
-function parseSolution(raw: string, problem: string): Solution {
-  let text = raw.trim();
-  // 去除 ```json ... ``` 包裹。
-  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fence) {
-    text = fence[1].trim();
-  }
-  // 截取第一个 { 到最后一个 }。
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start >= 0 && end > start) {
-    text = text.slice(start, end + 1);
-  }
-  try {
-    const obj = JSON.parse(text);
-    const steps: SolutionStep[] = Array.isArray(obj.steps) ? obj.steps : [];
-    steps.forEach((s, i) => {
-      if (!s.id) {
-        s.id = `s${i + 1}`;
-      }
-      if (!s.metadata) {
-        s.metadata = {};
-      }
-    });
-    return {
-      problem: obj.problem || problem,
-      finalAnswer: obj.finalAnswer,
-      steps,
-    };
-  } catch (e) {
-    throw new Error(
-      '无法解析 AI 返回的解题方案（JSON 格式错误）。可尝试重试或切换到 mock 引擎。'
-    );
-  }
 }

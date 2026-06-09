@@ -439,7 +439,7 @@ details.meta-row summary {
 .floating-menu {
   margin-top: 12px;
   background: var(--vscode-menu-background, var(--card-bg));
-  border: 1px solid var(--border);
+  border: 1px solid var(--accent);
   border-radius: var(--radius);
   padding: 10px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
@@ -704,4 +704,368 @@ details.meta-row summary {
 /* 输入区折叠态 */
 .problem-input.collapsed {
   padding: 0;
+}
+
+/* ===== 划词迷你工具条 ===== */
+.selection-toolbar {
+  position: fixed;
+  z-index: 200;
+  background: var(--vscode-editorWidget-background, var(--card-bg));
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  padding: 4px;
+}
+.selection-toolbar-ask {
+  width: 280px;
+  padding: 8px;
+}
+.selection-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.selection-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--vscode-button-secondaryBackground, rgba(127, 127, 127, 0.12));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.selection-btn:hover {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.selection-btn-close {
+  padding: 4px 6px;
+}
+.selection-ask-box textarea {
+  width: 100%;
+  min-height: 56px;
+  resize: vertical;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 12px;
+}
+.selection-ask-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.comparison-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.comparison-header,
+.comparison-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+}
+.comparison-cell {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  font-size: 13px;
+}
+.comparison-cell.header {
+  background: var(--card-bg);
+  font-weight: 600;
+}
+.param-explorer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.param-row label {
+  display: block;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.param-row input[type='range'] {
+  width: 100%;
+}
+.param-preview {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: var(--card-bg);
+  border-radius: 4px;
+}
+.restate-confirm .restate-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.practice-loader .practice-problem {
+  margin: 8px 0;
+  padding: 8px;
+  background: var(--card-bg);
+  border-radius: 4px;
+}
+.branch-tree {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 8px;
+  background: var(--card-bg);
+  border-radius: var(--radius);
+}
+.branch-tab {
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+}
+.branch-tab.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.diff-refresh-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--vscode-editorWidget-background);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.geometry-svg {
+  background: var(--card-bg);
+  border-radius: 6px;
+  margin-top: 8px;
+}
+.viz-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+.viz-table th,
+.viz-table td {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+}
+.thread-history {
+  margin-top: 8px;
+  font-size: 12px;
+}
+.thread-history ul {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0;
+}
+.thread-history li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.result-actions {
+  display: flex;
+  gap: 4px;
+}
+.result-cancelled {
+  color: var(--muted);
+  font-size: 13px;
+}
+.retry-btn {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+.snapshot-hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.final-reveal {
+  margin-top: 12px;
+}
+.status-cancelled {
+  opacity: 0.7;
+}
+
+/* ===== Gap 补齐：题干拆解 / 微步骤 / 验算高亮 ===== */
+.problem-breakdown .bd-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+}
+.bd-item {
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border-radius: 6px;
+  border-left: 3px solid var(--border);
+}
+.bd-given { border-left-color: #22c55e; background: rgba(34, 197, 94, 0.08); }
+.bd-unknown { border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.08); }
+.bd-constraint { border-left-color: #ef4444; background: rgba(239, 68, 68, 0.08); }
+.bd-goal { border-left-color: #3b82f6; background: rgba(59, 130, 246, 0.08); }
+.bd-hint { border-left-color: #a855f7; background: rgba(168, 85, 247, 0.08); }
+.bd-role {
+  font-size: 11px;
+  font-weight: 600;
+  margin-right: 8px;
+  opacity: 0.85;
+}
+.bd-note {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.breakdown-banner {
+  margin: 8px 16px;
+  padding: 10px 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.breakdown-banner-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.restate-badge {
+  margin-left: 12px;
+  font-size: 12px;
+  color: #22c55e;
+}
+.step-card.step-warning {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.35);
+}
+.micro-step-list .micro-steps {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+}
+.micro-step-head {
+  width: 100%;
+  text-align: left;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  cursor: pointer;
+  color: inherit;
+}
+.micro-step-list li.open .micro-step-head {
+  border-color: var(--accent);
+}
+.micro-index {
+  display: inline-block;
+  width: 22px;
+  font-weight: 600;
+}
+.micro-op {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.micro-step-body {
+  padding: 8px 12px 12px 34px;
+}
+.theorem-check .tc-item {
+  padding: 8px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.theorem-check .tc-item.ok { border-left: 3px solid #22c55e; }
+.theorem-check .tc-item.fail { border-left: 3px solid #ef4444; }
+.theorem-check .tc-pre {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+.variant-loader, .variant-note, .variant-problem {
+  margin: 8px 0;
+}
+.restate-done {
+  margin-top: 10px;
+  color: #22c55e;
+  font-size: 13px;
+}
+.learning-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.learning-list li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.learning-content {
+  margin-bottom: 4px;
+}
+.side-hint.ok {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #22c55e;
+}
+.snapshot-compare {
+  margin: 8px 16px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-bg);
+}
+.sc-head {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.sc-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.sc-title {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.sc-body {
+  font-size: 12px;
+}
+.sc-body ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+.highlighted-content .hl-line.warn {
+  background: rgba(245, 158, 11, 0.12);
+  border-left: 3px solid #f59e0b;
+  padding: 4px 8px;
+  margin: 4px 0;
+  border-radius: 4px;
+}
+.hl-msg {
+  display: block;
+  font-size: 11px;
+  color: #f59e0b;
+  margin-bottom: 2px;
+}
+.branch-continue {
+  margin-left: 8px;
 }

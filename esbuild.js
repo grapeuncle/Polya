@@ -26,6 +26,23 @@ function copyKatexAssets() {
   }
 }
 
+/** 复制 Mermaid 到 dist/media（离线思维导图）。 */
+function copyMermaid() {
+  let mermaidDist;
+  try {
+    mermaidDist = path.dirname(require.resolve('mermaid/package.json'));
+  } catch {
+    console.warn('[esbuild] 未找到 mermaid，思维导图将回退 CDN。');
+    return;
+  }
+  const src = path.join(mermaidDist, 'dist', 'mermaid.min.js');
+  const outDir = path.join(__dirname, 'dist', 'media');
+  fs.mkdirSync(outDir, { recursive: true });
+  if (fs.existsSync(src)) {
+    fs.copyFileSync(src, path.join(outDir, 'mermaid.min.js'));
+  }
+}
+
 /** 复制 VS Code Codicons 图标字体与 CSS 到 dist/media。 */
 function copyCodicons() {
   let codiconDir;
@@ -99,6 +116,7 @@ const webviewConfig = {
 async function main() {
   copyKatexAssets();
   copyCodicons();
+  copyMermaid();
   if (watch) {
     const ctxExt = await esbuild.context(extensionConfig);
     const ctxWeb = await esbuild.context(webviewConfig);

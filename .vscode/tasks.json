@@ -2,25 +2,12 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "npm: watch",
+      "label": "npm: dev",
       "type": "npm",
-      "script": "watch",
+      "script": "dev",
       "isBackground": true,
       "group": { "kind": "build", "isDefault": true },
-      "problemMatcher": {
-        "owner": "esbuild",
-        "pattern": {
-          "regexp": "^\\[esbuild\\] (.*)$",
-          "file": 1,
-          "location": 1,
-          "message": 1
-        },
-        "background": {
-          "activeOnStart": true,
-          "beginsPattern": "watch 模式已启动",
-          "endsPattern": "构建成功"
-        }
-      }
+      "problemMatcher": []
     }
   ]
 }

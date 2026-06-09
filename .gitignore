@@ -1,5 +1,7 @@
 node_modules/
 dist/
+.env
+public/imported-prefs.json
 out/
 *.vsix
 .DS_Store

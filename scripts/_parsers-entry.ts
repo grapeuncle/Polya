@@ -1,11 +1,11 @@
 // 测试入口：导出供 corner case 脚本使用的纯函数。
-export { parseSolution, parsePhaseSteps } from '../src/engines/parseSolution';
-export { normalizeSolutionStep, normalizeSteps } from '../src/shared/normalizeStep';
-export { parseActionOutput, parseMarkdownTable } from '../src/engines/parseActionOutput';
-export { tryEvalNumeric, substituteParams, formatParamPreview } from '../src/webview/utils/paramEval';
+export { parseSolution, parsePhaseSteps } from '../engines/parseSolution';
+export { normalizeSolutionStep, normalizeSteps } from '../shared/normalizeStep';
+export { parseActionOutput, parseMarkdownTable } from '../engines/parseActionOutput';
+export { tryEvalNumeric, substituteParams, formatParamPreview } from '../client/utils/paramEval';
 
-import { SolutionStep, Phase, MenuActionId } from '../src/shared/types';
-import { PHASE_ORDER } from '../src/shared/types';
+import { SolutionStep, Phase, MenuActionId } from '../shared/types';
+import { PHASE_ORDER } from '../shared/types';
 
 /** 从 store.ts 提取的纯函数（避免打包 zustand）。 */
 export function findStep(steps: SolutionStep[], id: string): SolutionStep | undefined {

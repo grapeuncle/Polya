@@ -2,12 +2,15 @@
 import { ISolverEngine, SolutionStreamHandlers, StreamHandlers } from './ISolverEngine';
 import {
   ActionResultMeta,
+  DetectedSubProblem,
   MenuActionId,
   PHASE_ORDER,
   Solution,
   SolutionStep,
   SolverContext,
+  SubProblemSolution,
 } from '../shared/types';
+import { detectSubProblems } from '../shared/subProblemDetector';
 
 async function streamText(
   text: string,
@@ -167,6 +170,22 @@ export class MockSolverEngine implements ISolverEngine {
     _ctx: SolverContext,
     handlers: SolutionStreamHandlers
   ): Promise<Solution> {
+    // 检测子问题
+    const subProblems = detectSubProblems(problem);
+
+    if (subProblems.length > 0) {
+      return this.solveSubProblemsMock(problem, subProblems, handlers);
+    }
+
+    // 单题四阶段（原有逻辑）
+    return this.solveSingleProblemMock(problem, handlers);
+  }
+
+  /** Mock 单题四阶段解题。 */
+  private async solveSingleProblemMock(
+    problem: string,
+    handlers: SolutionStreamHandlers
+  ): Promise<Solution> {
     const template = pickTemplate(problem);
     const steps = buildSteps(problem, template);
     const byPhase = PHASE_ORDER.map((p) => ({
@@ -190,6 +209,94 @@ export class MockSolverEngine implements ISolverEngine {
       problem,
       finalAnswer: template === 'quadratic' ? '请根据具体方程代入验证' : undefined,
       steps,
+    };
+    handlers.onComplete(solution);
+    return solution;
+  }
+
+  /** Mock 多子问题四阶段解题。 */
+  private async solveSubProblemsMock(
+    problem: string,
+    subProblems: DetectedSubProblem[],
+    handlers: SolutionStreamHandlers
+  ): Promise<Solution> {
+    const allSteps: SolutionStep[] = [];
+    const subSolutions: SubProblemSolution[] = [];
+    const subAnswers: { id: number; label: string; answer: string }[] = [];
+
+    for (const sub of subProblems) {
+      if (handlers.signal?.aborted) {
+        break;
+      }
+
+      handlers.onSubProblemStart?.(sub.index, sub.label, sub.text);
+
+      const subSteps: SolutionStep[] = [];
+      let subFinalAnswer: string | undefined;
+
+      for (const phase of PHASE_ORDER) {
+        if (handlers.signal?.aborted) {
+          break;
+        }
+        handlers.onPhaseStart(phase);
+
+        const stepId = `sub${sub.index}-${phase}`;
+        const phaseStep: SolutionStep = {
+          id: stepId,
+          phase,
+          content: `[Mock] 第 ${sub.index} 小问 — ${phase === 'understanding' ? '理解题目' : phase === 'devising' ? '拟定方案' : phase === 'carrying-out' ? '执行方案' : '回顾反思'}：${sub.text.slice(0, 60)}...`,
+          metadata: {
+            objective: `处理第 ${sub.index} 小问的 ${phase} 阶段。`,
+          },
+          subProblemIndex: sub.index,
+        };
+
+        if (phase === 'carrying-out') {
+          phaseStep.subSteps = [
+            { id: `${stepId}-a`, phase: 'carrying-out', content: `[Mock] 第 ${sub.index} 小问：代入公式/条件求解。`, metadata: {} },
+            { id: `${stepId}-b`, phase: 'carrying-out', content: `[Mock] 得到中间结果。`, metadata: {} },
+          ];
+        }
+
+        if (phase === 'looking-back') {
+          subFinalAnswer = `第 ${sub.index} 小问 Mock 答案`;
+        }
+
+        await new Promise((r) => setTimeout(r, 150));
+        const phaseSteps = [phaseStep];
+        subSteps.push(...phaseSteps);
+        allSteps.push(...phaseSteps);
+        handlers.onPhaseSteps(phase, phaseSteps);
+      }
+
+      const phasesMap: Partial<Record<typeof PHASE_ORDER[number], SolutionStep[]>> = {};
+      for (const phase of PHASE_ORDER) {
+        const ps = subSteps.filter((s) => s.phase === phase);
+        if (ps.length > 0) {
+          phasesMap[phase] = ps;
+        }
+      }
+
+      subSolutions.push({
+        index: sub.index,
+        label: sub.label,
+        subProblem: sub.text,
+        phases: phasesMap,
+        finalAnswer: subFinalAnswer,
+      });
+
+      if (subFinalAnswer) {
+        subAnswers.push({ id: sub.index, label: sub.label, answer: subFinalAnswer });
+      }
+
+      handlers.onSubProblemComplete?.(sub.index, subFinalAnswer);
+    }
+
+    const solution: Solution = {
+      problem,
+      steps: allSteps,
+      subAnswers: subAnswers.length > 0 ? subAnswers : undefined,
+      subSolutions: subSolutions.length > 0 ? subSolutions : undefined,
     };
     handlers.onComplete(solution);
     return solution;

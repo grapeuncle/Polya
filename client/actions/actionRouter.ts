@@ -1,7 +1,7 @@
 // 动作路由器：本地 metadata 优先，否则委托引擎。
 import { MenuActionId, SolutionStep } from '../../shared/types';
 import { ActionResult, findStep } from '../store';
-import { copyToClipboard, newRequestId } from '../api/transport';
+import { copyToClipboard, newRequestId } from '../transport';
 
 /** 动作结果标题；划选时附加片段摘要。 */
 export function buildActionTitle(action: MenuActionId, selectedText?: string): string {

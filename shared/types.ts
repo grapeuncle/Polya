@@ -96,6 +96,8 @@ export interface SolutionStep {
   /** 可折叠的详细推导子步骤。 */
   subSteps?: SolutionStep[];
   metadata: StepMetadata;
+  /** 所属子问题索引（1-based），用于多子问题时按子问题分组展示步骤。 */
+  subProblemIndex?: number;
 }
 
 /** 难度（解释详细程度）。 */
@@ -113,6 +115,38 @@ export interface Solution {
   steps: SolutionStep[];
   /** 最终答案（若有）。 */
   finalAnswer?: string;
+  /** 分小问的结构化答案（用于大题包含多小问时分别展示）。 */
+  subAnswers?: SubAnswer[];
+  /** 多子问题时每个子问题的完整解题结果。 */
+  subSolutions?: SubProblemSolution[];
+}
+
+/** 单小问答案。 */
+export interface SubAnswer {
+  id: number;
+  label: string;
+  answer: string;
+}
+
+/** 一个子问题的完整四阶段解题结果。 */
+export interface SubProblemSolution {
+  /** 子问题序号（1-based）。 */
+  index: number;
+  /** 子问题标签，如 "（1）"。 */
+  label: string;
+  /** 子问题文本内容。 */
+  subProblem: string;
+  /** 该子问题的四个阶段步骤，按阶段分组。 */
+  phases: Partial<Record<Phase, SolutionStep[]>>;
+  /** 该子问题的最终答案。 */
+  finalAnswer?: string;
+}
+
+/** 检测到的子问题信息（仅用于拆分阶段，不参与求解结果）。 */
+export interface DetectedSubProblem {
+  index: number;
+  label: string;
+  text: string;
 }
 
 /** 阶段状态机。 */
@@ -235,6 +269,10 @@ export interface SolverContext {
   activeBranch?: SolutionBranch;
   /** 学生在步骤内划选的文本片段（若有）。 */
   focusedSelection?: string;
+  /** 当前正在处理的子问题序号（1-based，多子问题时使用）。 */
+  currentSubProblemIndex?: number;
+  /** 已完成子问题的简要结果（供后续子问题作为已知条件引用）。 */
+  completedSubResults?: { index: number; label: string; finalAnswer?: string }[];
 }
 
 // ============== Webview -> Extension 消息 ==============
@@ -259,7 +297,8 @@ export type WebviewToExtMessage =
   | { type: 'reportState'; completedPhases: Phase[] }
   | { type: 'info'; message: string }
   | { type: 'error'; message: string }
-  | { type: 'requestState' };
+  | { type: 'requestState' }
+  | { type: 'solveSubProblem'; requestId: string; index: number; subProblem: string };
 
 // ============== Extension -> Webview 消息 ==============
 
@@ -268,8 +307,15 @@ export type ExtToWebviewMessage =
   | { type: 'solutionStart'; problem: string }
   | { type: 'solutionPhaseStart'; phase: Phase }
   | { type: 'solutionPhaseSteps'; phase: Phase; steps: SolutionStep[] }
+  | { type: 'solutionPhaseChunk'; phase: Phase; chunk: string }
+  | { type: 'solutionHeartbeat'; phase: Phase; elapsedMs: number }
   | { type: 'solution'; solution: Solution }
   | { type: 'solveError'; message: string }
+  | { type: 'subProblemStart'; index: number; label: string; subProblem: string }
+  | { type: 'subProblemPhaseSteps'; index: number; phase: Phase; steps: SolutionStep[] }
+  | { type: 'subProblemComplete'; index: number; finalAnswer?: string }
+  | { type: 'subProblemSteps'; requestId: string; index: number; steps: SolutionStep[] }
+  | { type: 'subProblemError'; requestId: string; index: number; message: string }
   | { type: 'branchStepsAppended'; branchId: string; steps: SolutionStep[] }
   // 流式动作结果：先 start，再多次 chunk，最后 end / error。
   | { type: 'actionStart'; requestId: string; action: MenuActionId; stepId: string }

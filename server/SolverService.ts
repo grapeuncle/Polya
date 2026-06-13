@@ -92,6 +92,9 @@ export class SolverService {
       case 'reportState':
         this.completedPhases = msg.completedPhases;
         break;
+      case 'solveSubProblem':
+        await this.runSubProblem(msg);
+        break;
       default:
         break;
     }
@@ -105,16 +108,33 @@ export class SolverService {
   private async solve(problem: string): Promise<void> {
     this.problem = problem;
     this.steps = [];
+    let currentPhase: Phase = 'understanding';
+    const startedAt = Date.now();
+    const heartbeatTimer = setInterval(() => {
+      this.emit({ type: 'solutionHeartbeat', phase: currentPhase, elapsedMs: Date.now() - startedAt });
+    }, 30000);
     try {
       if (!this.engine) {
         this.engine = await createEngine(this.appConfig);
       }
       const ctx = this.buildContext();
       const solution = await this.engine.generateSolutionStreaming(problem, ctx, {
-        onPhaseStart: (phase) => this.emit({ type: 'solutionPhaseStart', phase }),
+        onSubProblemStart: (index, label, subProblem) => {
+          this.emit({ type: 'subProblemStart', index, label, subProblem });
+        },
+        onPhaseStart: (phase) => {
+          currentPhase = phase;
+          this.emit({ type: 'solutionPhaseStart', phase });
+        },
         onPhaseSteps: (phase, steps) => {
           this.steps = [...this.steps, ...steps];
           this.emit({ type: 'solutionPhaseSteps', phase, steps });
+        },
+        onPhaseChunk: (phase, chunk) => {
+          this.emit({ type: 'solutionPhaseChunk', phase, chunk });
+        },
+        onSubProblemComplete: (index, finalAnswer) => {
+          this.emit({ type: 'subProblemComplete', index, finalAnswer });
         },
         onComplete: (sol) => {
           this.steps = sol.steps;
@@ -125,6 +145,8 @@ export class SolverService {
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       this.emit({ type: 'solveError', message });
+    } finally {
+      clearInterval(heartbeatTimer);
     }
   }
 
@@ -237,6 +259,48 @@ export class SolverService {
       } else {
         const message = e instanceof Error ? e.message : String(e);
         this.emit({ type: 'actionError', requestId, message });
+      }
+    } finally {
+      this.inflight.delete(requestId);
+    }
+  }
+
+  private async runSubProblem(
+    msg: Extract<WebviewToExtMessage, { type: 'solveSubProblem' }>
+  ): Promise<void> {
+    const { requestId, index, subProblem } = msg;
+    const controller = new AbortController();
+    this.inflight.set(requestId, controller);
+    try {
+      if (!this.engine) {
+        this.engine = await createEngine(this.appConfig);
+      }
+      const ctx = this.buildContext();
+      let steps: SolutionStep[] = [];
+      if (this.engine.solveSubProblem) {
+        steps = await this.engine.solveSubProblem(index, subProblem, ctx, {
+          onChunk: (_chunk) => { /* chunks handled via SSE */ },
+          signal: controller.signal,
+        });
+      } else {
+        // Fallback: use globalAsk to explain this sub-problem
+        await this.engine.globalAsk(`请仅解答第 ${index} 小问：${subProblem}`, ctx, {
+          onChunk: (chunk) => this.emit({ type: 'actionChunk', requestId, chunk }),
+          signal: controller.signal,
+        });
+        this.emit({ type: 'actionEnd', requestId });
+        return;
+      }
+      this.emit({ type: 'subProblemSteps', requestId, index, steps });
+    } catch (e: unknown) {
+      if (
+        (e instanceof Error && e.name === 'AbortError') ||
+        controller.signal.aborted
+      ) {
+        this.emit({ type: 'actionCancelled', requestId });
+      } else {
+        const message = e instanceof Error ? e.message : String(e);
+        this.emit({ type: 'subProblemError', requestId, index, message });
       }
     } finally {
       this.inflight.delete(requestId);

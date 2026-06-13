@@ -16,7 +16,7 @@ import {
 } from '../shared/types';
 import { normalizeSteps } from '../shared/normalizeStep';
 import { ACTION_TITLES, buildActionTitle, routeAction } from './actions/actionRouter';
-import { newRequestId, postMessage, showToast } from './api/transport';
+import { newRequestId, postMessage, showToast } from './transport';
 
 /** 一条动作结果卡片（解释 / 验算 / 对比等）。 */
 export interface ActionResult {
@@ -91,21 +91,34 @@ interface PolyaState {
   subGoals: SubGoal[];
   activeBreakdown: ActionResultMeta['breakdown'] | null;
   solvingPhase: Phase | null;
+  solvingChunk: string;
   compareSnapshotId: string | null;
   difficultyResubmitPrompt: boolean;
+  /** 当前正在处理的子问题索引（1-based，多子问题时使用）。 */
+  currentSubProblemIndex: number | null;
+  /** 检测到的子问题列表。 */
+  subProblems: { index: number; label: string; text: string }[];
+  /** 子问题求解状态。 */
+  subProblemStatus: Record<number, 'pending' | 'solving' | 'done'>;
+  /** 用户当前选中查看的子问题索引（1-based），null 表示查看全部。 */
+  selectedSubProblemIndex: number | null;
 
   setInputProblem: (v: string) => void;
   submitProblem: (problem: string) => void;
   onSolutionStart: (problem: string) => void;
   onSolutionPhaseStart: (phase: Phase) => void;
   onSolutionPhaseSteps: (phase: Phase, steps: SolutionStep[]) => void;
+  onSolutionPhaseChunk: (phase: Phase, chunk: string) => void;
   onSolution: (s: Solution) => void;
   onSolveError: (msg: string) => void;
+  onSubProblemSteps: (requestId: string, index: number, steps: SolutionStep[]) => void;
+  onSubProblemError: (requestId: string, index: number, message: string) => void;
   onBranchStepsAppended: (branchId: string, steps: SolutionStep[]) => void;
   selectStep: (id: string | null) => void;
   setPhase: (p: Phase) => void;
   toggleSubSteps: (id: string) => void;
   runAction: (action: MenuActionId, stepId: string, question?: string, selectedText?: string) => void;
+  runSubProblem: (index: number, subProblem: string) => string;
   runGlobalAsk: (question: string) => void;
   toggleFlag: (stepId: string) => void;
   copyStep: (stepId: string) => void;
@@ -140,6 +153,9 @@ interface PolyaState {
   getDisplaySteps: () => SolutionStep[];
   markPhaseInteracted: (phase: Phase) => void;
   recomputeCompletedPhases: () => void;
+  onSubProblemStart: (index: number, label: string, subProblem: string) => void;
+  onSubProblemComplete: (index: number, finalAnswer?: string) => void;
+  setSelectedSubProblem: (index: number | null) => void;
 }
 
 const MAX_BRANCHES = 3;
@@ -224,8 +240,13 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
   subGoals: [],
   activeBreakdown: null,
   solvingPhase: null,
+  solvingChunk: '',
   compareSnapshotId: null,
   difficultyResubmitPrompt: false,
+  currentSubProblemIndex: null,
+  subProblems: [],
+  subProblemStatus: {},
+  selectedSubProblemIndex: null,
 
   setInputProblem: (v) => set({ inputProblem: v }),
 
@@ -259,6 +280,7 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
     set({
       problem,
       solving: true,
+      solvingChunk: '',
       solveError: null,
       solution: null,
       steps: [],
@@ -281,6 +303,10 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
       activeBreakdown: null,
       solvingPhase: null,
       compareSnapshotId: null,
+      currentSubProblemIndex: null,
+      subProblems: [],
+      subProblemStatus: {},
+      selectedSubProblemIndex: null,
     }),
 
   onSolutionPhaseStart: (phase) => set({ solvingPhase: phase }),
@@ -291,8 +317,13 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
       steps: [...s.steps, ...steps],
       currentPhase: phase,
       solvingPhase: phase,
+      solvingChunk: '',
     }));
     get().markPhaseViewed(phase);
+  },
+
+  onSolutionPhaseChunk: (_phase, chunk) => {
+    set((s) => ({ solvingChunk: s.solvingChunk + chunk }));
   },
 
   onSolution: (s) => {
@@ -302,6 +333,7 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
       steps,
       solving: false,
       solvingPhase: null,
+      solvingChunk: '',
       showFinalAnswer: !get().teacherMode,
     });
     get().recomputeCompletedPhases();
@@ -309,6 +341,30 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
   },
 
   onSolveError: (msg) => set({ solving: false, solvingPhase: null, solveError: msg }),
+
+  onSubProblemSteps: (requestId, index, newSteps) => {
+    const normSteps = normalizeSteps(newSteps, 'carrying-out');
+    set((s) => ({
+      results: s.results.map((r) =>
+        r.requestId === requestId
+          ? {
+              ...r,
+              status: 'done' as const,
+              content: normSteps.map((ns) => ns.content).join('\n\n'),
+              meta: { kind: 'text', title: `第 ${index} 小问解答` },
+            }
+          : r
+      ),
+    }));
+    get().addHistory(`独立求解第 ${index} 小问`);
+  },
+
+  onSubProblemError: (requestId, _index, message) =>
+    set((s) => ({
+      results: s.results.map((r) =>
+        r.requestId === requestId ? { ...r, status: 'error' as const, content: r.content || message } : r
+      ),
+    })),
 
   onBranchStepsAppended: (branchId, newSteps) => {
     set((s) => ({
@@ -349,6 +405,37 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
     postMessage({ type: 'reportState', completedPhases });
   },
 
+  onSubProblemStart: (index, label, subProblem) => {
+    set((s) => ({
+      currentSubProblemIndex: index,
+      subProblems: s.subProblems.some((p) => p.index === index)
+        ? s.subProblems
+        : [...s.subProblems, { index, label, text: subProblem }],
+      subProblemStatus: { ...s.subProblemStatus, [index]: 'solving' },
+    }));
+    get().addHistory(`开始求解第 ${index} 小问：${label}`);
+  },
+
+  onSubProblemComplete: (index, _finalAnswer) => {
+    set((s) => ({
+      currentSubProblemIndex: s.currentSubProblemIndex === index ? null : s.currentSubProblemIndex,
+      subProblemStatus: { ...s.subProblemStatus, [index]: 'done' },
+    }));
+    get().addHistory(`第 ${index} 小问求解完成`);
+  },
+
+  setSelectedSubProblem: (index) => {
+    set({ selectedSubProblemIndex: index });
+    // 滚动到该子问题的横幅位置
+    if (index !== null) {
+      requestAnimationFrame(() => {
+        document
+          .getElementById(`sub-banner-${index}`)
+          ?.scrollIntoView({ behavior: 'smooth' });
+      });
+    }
+  },
+
   selectStep: (id) => {
     set({ selectedStepId: id });
     if (id) {
@@ -357,6 +444,10 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
         set({ currentPhase: step.phase });
         get().markPhaseInteracted(step.phase);
         get().markPhaseViewed(step.phase);
+        // 自动同步选中子问题
+        if (step.subProblemIndex != null) {
+          set({ selectedSubProblemIndex: step.subProblemIndex });
+        }
       }
     }
   },
@@ -461,6 +552,28 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
       threadMessages: get().threads['__global__']?.messages ?? [],
     });
     get().addHistory(`全局提问：${question.slice(0, 16)}`);
+  },
+
+  runSubProblem: (index, subProblem) => {
+    const rid = newRequestId();
+    get().pushSnapshot(`独立求解第 ${index} 小问`);
+    set((s) => ({
+      results: [
+        ...s.results,
+        {
+          requestId: rid,
+          stepId: `__sub_${index}__`,
+          action: 'ask' as MenuActionId,
+          title: `单独求解第 ${index} 小问`,
+          content: '',
+          status: 'streaming' as const,
+          difficultyAtCreation: s.difficulty,
+        },
+      ],
+    }));
+    postMessage({ type: 'solveSubProblem', requestId: rid, index, subProblem });
+    get().addHistory(`单独求解第 ${index} 小问`);
+    return rid;
   },
 
   appendThreadMessage: (stepId, role, content) => {

@@ -33,6 +33,9 @@ export function normalizeSolutionStep(
   if (typeof s.rawLatex === 'string') {
     step.rawLatex = s.rawLatex;
   }
+  if (typeof s.subProblemIndex === 'number') {
+    step.subProblemIndex = s.subProblemIndex;
+  }
   if (s.subSteps != null) {
     const subs = Array.isArray(s.subSteps) ? s.subSteps : [];
     const normalized = subs

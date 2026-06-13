@@ -6,6 +6,9 @@ import { endSse, initSse } from '../sse';
 import { Difficulty, ExtToWebviewMessage, WebviewToExtMessage } from '../../shared/types';
 import { SolverService } from '../SolverService';
 
+/** 题目最大长度（字符数），防止超长输入超出 LLM 上下文窗口。 */
+const MAX_PROBLEM_LENGTH = 5000;
+
 function resolveSessionId(req: Request): string | undefined {
   return (
     (req.headers['x-session-id'] as string) ||
@@ -112,6 +115,10 @@ export function createApiRouter(appConfig: AppConfig): Router {
       res.status(400).json({ error: '缺少 problem' });
       return;
     }
+    if (problem.length > MAX_PROBLEM_LENGTH) {
+      res.status(400).json({ error: `题目过长（${problem.length} 字符），最多允许 ${MAX_PROBLEM_LENGTH} 字符。` });
+      return;
+    }
     await runSseTask(res, service, () => service.startSolve(problem.trim()));
   });
 
@@ -193,6 +200,21 @@ export function createApiRouter(appConfig: AppConfig): Router {
     }
     await service.handleMessage({ type: 'setDifficulty', difficulty });
     res.json({ ok: true });
+  });
+
+  router.post('/solve-subproblem', async (req, res) => {
+    const service = requireSession(req, res);
+    if (!service) {
+      return;
+    }
+    const { requestId, index, subProblem } = req.body;
+    if (!requestId || index == null || !subProblem?.trim()) {
+      res.status(400).json({ error: '缺少 requestId、index 或 subProblem' });
+      return;
+    }
+    await runSseTask(res, service, () =>
+      service.handleMessage({ type: 'solveSubProblem', requestId, index, subProblem: subProblem.trim() })
+    );
   });
 
   return router;

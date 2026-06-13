@@ -5,7 +5,7 @@ import {
   MenuActionId,
   SolutionBranch,
 } from '../../shared/types';
-import { newRequestId, postMessage } from '../api/transport';
+import { newRequestId, postMessage } from '../transport';
 
 export function postSolve(problem: string): void {
   postMessage({ type: 'solve', problem });

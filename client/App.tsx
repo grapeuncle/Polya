@@ -1,6 +1,6 @@
 // 主布局：顶部阶段导航、左侧题目输入与侧边栏、主区域步骤列表 / 思维导图。
 import React, { useEffect } from 'react';
-import { initSession, onEvent } from './api/transport';
+import { initSession, onEvent } from './transport';
 import { usePolyaStore } from './store';
 import { PhaseNav } from './components/PhaseNav';
 import { ProblemInput } from './components/ProblemInput';
@@ -15,15 +15,22 @@ import { SnapshotCompare } from './components/SnapshotCompare';
 import { PHASE_META } from '../shared/types';
 import { Toast } from './components/Toast';
 import { MarkdownView } from './render/MarkdownView';
+import { SubProblemNav } from './components/SubProblemNav';
+import { SubProblemBanner } from './components/SubProblemBanner';
 
 export const App: React.FC = () => {
   const initFromExt = usePolyaStore((s) => s.initFromExt);
   const onSolutionStart = usePolyaStore((s) => s.onSolutionStart);
   const onSolutionPhaseStart = usePolyaStore((s) => s.onSolutionPhaseStart);
   const onSolutionPhaseSteps = usePolyaStore((s) => s.onSolutionPhaseSteps);
+  const onSolutionPhaseChunk = usePolyaStore((s) => s.onSolutionPhaseChunk);
   const onSolution = usePolyaStore((s) => s.onSolution);
   const onBranchStepsAppended = usePolyaStore((s) => s.onBranchStepsAppended);
   const onSolveError = usePolyaStore((s) => s.onSolveError);
+  const onSubProblemSteps = usePolyaStore((s) => s.onSubProblemSteps);
+  const onSubProblemError = usePolyaStore((s) => s.onSubProblemError);
+  const onSubProblemStart = usePolyaStore((s) => s.onSubProblemStart);
+  const onSubProblemComplete = usePolyaStore((s) => s.onSubProblemComplete);
   const onActionStart = usePolyaStore((s) => s.onActionStart);
   const onActionChunk = usePolyaStore((s) => s.onActionChunk);
   const onActionEnd = usePolyaStore((s) => s.onActionEnd);
@@ -49,6 +56,12 @@ export const App: React.FC = () => {
         case 'solutionPhaseSteps':
           onSolutionPhaseSteps(msg.phase, msg.steps);
           break;
+        case 'solutionPhaseChunk':
+          onSolutionPhaseChunk(msg.phase, msg.chunk);
+          break;
+        case 'solutionHeartbeat':
+          // heartbeat handled internally by the engine; UI can optionally show elapsed time
+          break;
         case 'solution':
           onSolution(msg.solution);
           break;
@@ -57,6 +70,22 @@ export const App: React.FC = () => {
           break;
         case 'solveError':
           onSolveError(msg.message);
+          break;
+        case 'subProblemSteps':
+          onSubProblemSteps(msg.requestId, msg.index, msg.steps);
+          break;
+        case 'subProblemError':
+          onSubProblemError(msg.requestId, msg.index, msg.message);
+          break;
+        case 'subProblemStart':
+          onSubProblemStart(msg.index, msg.label, msg.subProblem);
+          break;
+        case 'subProblemComplete':
+          onSubProblemComplete(msg.index, msg.finalAnswer);
+          break;
+        case 'subProblemPhaseSteps':
+          // Multi-sub-problem phase steps come through solutionPhaseSteps
+          onSolutionPhaseSteps(msg.phase, msg.steps);
           break;
         case 'actionStart':
           onActionStart(msg.requestId, msg.action, msg.stepId);
@@ -85,7 +114,7 @@ export const App: React.FC = () => {
     const onBodyClick = (e: MouseEvent) => {
       const el = e.target as Element;
       if (
-        el.closest('.step-card, .floating-menu, .selection-toolbar, .phase-nav, .sidebar, .mindmap')
+        el.closest('.step-card, .floating-menu, .selection-toolbar, .phase-nav, .sidebar, .mindmap, .sub-problem-nav')
       ) {
         return;
       }
@@ -108,6 +137,11 @@ export const App: React.FC = () => {
   const difficultyRefreshPrompt = usePolyaStore((s) => s.difficultyRefreshPrompt);
   const difficultyResubmitPrompt = usePolyaStore((s) => s.difficultyResubmitPrompt);
   const solvingPhase = usePolyaStore((s) => s.solvingPhase);
+  const solvingChunk = usePolyaStore((s) => s.solvingChunk);
+  const currentSubProblemIndex = usePolyaStore((s) => s.currentSubProblemIndex);
+  const subProblems = usePolyaStore((s) => s.subProblems);
+  const subProblemStatus = usePolyaStore((s) => s.subProblemStatus);
+  const selectedSubProblemIndex = usePolyaStore((s) => s.selectedSubProblemIndex);
   const activeBreakdown = usePolyaStore((s) => s.activeBreakdown);
   const restateConfirmed = usePolyaStore((s) => s.restateConfirmed);
   const steps = usePolyaStore((s) => s.steps);
@@ -129,6 +163,56 @@ export const App: React.FC = () => {
     }
     return [...steps.slice(0, idx + 1), ...branch.alternativeSteps];
   }, [steps, branches, activeBranchId]);
+
+  /** 按子问题分组后的步骤列表，每组含 { subProblemIndex, label, text, status, steps, startIndex }。 */
+  const groupedSteps = React.useMemo(() => {
+    const hasSubs = subProblems.length > 0;
+    if (!hasSubs) {
+      // 无子问题场景：全部步骤归为一组
+      return [{ key: '__global__', subProblemIndex: null as number | null, steps: displaySteps, startIndex: 0 }];
+    }
+    const groups: {
+      key: string;
+      subProblemIndex: number | null;
+      label?: string;
+      text?: string;
+      status?: 'pending' | 'solving' | 'done';
+      steps: typeof displaySteps;
+      startIndex: number;
+    }[] = [];
+    let globalIdx = 0;
+    const remaining = new Set(displaySteps.map((s) => s.id));
+
+    for (const sub of subProblems) {
+      const subSteps = displaySteps.filter((s) => s.subProblemIndex === sub.index);
+      for (const s of subSteps) {
+        remaining.delete(s.id);
+      }
+      groups.push({
+        key: `sub-${sub.index}`,
+        subProblemIndex: sub.index,
+        label: sub.label,
+        text: sub.text,
+        status: subProblemStatus[sub.index] || 'pending',
+        steps: subSteps,
+        startIndex: globalIdx,
+      });
+      globalIdx += subSteps.length;
+    }
+
+    // 未标记子问题的步骤归入一组（放在最后）
+    if (remaining.size > 0) {
+      const unlabeled = displaySteps.filter((s) => remaining.has(s.id));
+      groups.push({
+        key: '__unlabeled__',
+        subProblemIndex: null,
+        steps: unlabeled,
+        startIndex: globalIdx,
+      });
+    }
+
+    return groups;
+  }, [displaySteps, subProblems, subProblemStatus]);
 
   const globalResults = React.useMemo(
     () => results.filter((r) => r.stepId === '__global__'),
@@ -184,7 +268,8 @@ export const App: React.FC = () => {
         <main className="main-col">
           {problem && (
             <div className="problem-banner">
-              <span className="codicon codicon-symbol-numeric" /> 题目：{problem}
+              题目：
+              <MarkdownView content={problem} className="problem-banner-content" raw />
               {restateConfirmed && (
                 <span className="restate-badge">
                   <span className="codicon codicon-check" /> 已确认理解
@@ -192,6 +277,8 @@ export const App: React.FC = () => {
               )}
             </div>
           )}
+
+          <SubProblemNav />
 
           {activeBreakdown?.sentences?.length ? (
             <div className="breakdown-banner">
@@ -209,6 +296,14 @@ export const App: React.FC = () => {
               {solvingPhase
                 ? `正在生成「${PHASE_META[solvingPhase].title}」阶段…`
                 : '正在按波利亚四阶段拆解题目…'}
+              {solvingChunk && (
+                <details className="streaming-preview">
+                  <summary>查看实时生成内容</summary>
+                  <div className="streaming-content">
+                    <MarkdownView content={solvingChunk} />
+                  </div>
+                </details>
+              )}
             </div>
           )}
 
@@ -231,10 +326,40 @@ export const App: React.FC = () => {
 
           {viewMode === 'list' ? (
             <div className="step-list">
-              {displaySteps.map((step, i) => (
-                <div id={`step-anchor-${step.id}`} key={step.id}>
-                  <StepCard step={step} index={i} />
-                </div>
+              {groupedSteps.map((group) => (
+                <React.Fragment key={group.key}>
+                  {group.label && (
+                    <SubProblemBanner
+                      index={group.subProblemIndex!}
+                      label={group.label}
+                      text={group.text!}
+                      status={group.status!}
+                    />
+                  )}
+                  {group.steps.map((step, i) => (
+                    <div id={`step-anchor-${step.id}`} key={step.id}>
+                      <StepCard step={step} index={i} />
+                    </div>
+                  ))}
+                  {/* 子问题最终答案 */}
+                  {group.subProblemIndex != null &&
+                    solution?.subSolutions?.find((ss) => ss.index === group.subProblemIndex)
+                      ?.finalAnswer &&
+                    (showFinalAnswer || !teacherMode) && (
+                      <div className="final-answer">
+                        <span className="codicon codicon-check-all" />{' '}
+                        第 {group.subProblemIndex} 问答案：
+                        <MarkdownView
+                          content={
+                            solution.subSolutions.find(
+                              (ss) => ss.index === group.subProblemIndex
+                            )!.finalAnswer!
+                          }
+                          className="final-answer-content"
+                        />
+                      </div>
+                    )}
+                </React.Fragment>
               ))}
               {solution?.finalAnswer && (showFinalAnswer || !teacherMode) && (
                 <div className="final-answer">

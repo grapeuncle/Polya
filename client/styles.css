@@ -336,6 +336,115 @@ input[type='range'] {
   border-radius: var(--radius);
   padding: 10px 12px;
   margin-bottom: 12px;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.problem-banner-content {
+  flex: 1;
+  min-width: 0;
+}
+.problem-banner-content p {
+  margin: 0.15em 0;
+}
+
+/* ===== 子问题导航栏 ===== */
+.sub-problem-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.sub-problem-nav-label {
+  font-size: 12px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.sub-problem-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.sub-problem-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 3px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--vscode-foreground);
+  transition: border-color 0.15s, background 0.15s;
+}
+.sub-problem-tab:hover {
+  border-color: var(--accent);
+}
+.sub-problem-tab.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.sub-problem-tab-done {
+  border-color: var(--vscode-charts-green, #4caf50);
+}
+.sub-problem-tab-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+.sub-problem-tab-spinner {
+  flex-shrink: 0;
+}
+.sub-problem-tab-check {
+  font-size: 12px;
+  color: var(--vscode-charts-green, #4caf50);
+}
+
+/* ===== 子问题横幅 ===== */
+.sub-problem-banner {
+  margin: 12px 0 4px;
+  padding: 10px 14px;
+  border-left: 4px solid var(--border);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--card-bg);
+}
+.sub-problem-banner.sub-problem-solving {
+  border-left-color: var(--accent);
+  background: rgba(14, 99, 156, 0.06);
+}
+.sub-problem-banner.sub-problem-done {
+  border-left-color: var(--vscode-charts-green, #4caf50);
+}
+.sub-problem-banner-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.sub-problem-banner-label {
+  font-weight: 600;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sub-problem-spinner {
+  flex-shrink: 0;
+}
+.sub-problem-banner-text {
+  font-size: 13px;
+  color: var(--vscode-foreground);
+  line-height: 1.5;
+}
+.sub-problem-banner-text p {
+  margin: 0.15em 0;
 }
 .solving-indicator,
 .error-banner {
@@ -345,6 +454,28 @@ input[type='range'] {
   padding: 10px 12px;
   border-radius: var(--radius);
   margin-bottom: 12px;
+}
+.solving-indicator {
+  flex-wrap: wrap;
+}
+.streaming-preview {
+  width: 100%;
+  margin-top: 8px;
+  font-size: 13px;
+}
+.streaming-preview summary {
+  cursor: pointer;
+  color: var(--vscode-textLink-foreground, var(--polya-accent));
+  padding: 4px 0;
+}
+.streaming-content {
+  background: var(--polya-card-bg);
+  border: 1px solid var(--polya-border);
+  border-radius: var(--radius);
+  padding: 10px;
+  max-height: 300px;
+  overflow-y: auto;
+  margin-top: 4px;
 }
 .error-banner {
   background: var(--vscode-inputValidation-errorBackground, rgba(255, 0, 0, 0.1));

@@ -7,6 +7,7 @@ import {
   SolutionStep,
   VizSpec,
 } from '../shared/types';
+import { sanitizeLatexJson } from './jsonSanitizer';
 
 interface ParsedJsonBlock {
   type:
@@ -32,7 +33,8 @@ function extractJsonBlocks(text: string): ParsedJsonBlock[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     try {
-      const data = JSON.parse(m[1].trim());
+      const jsonText = sanitizeLatexJson(m[1].trim());
+      const data = JSON.parse(jsonText);
       blocks.push(classifyJson(data));
     } catch {
       blocks.push({ type: 'unknown', data: null });

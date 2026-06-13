@@ -19,8 +19,13 @@ export interface StreamHandlers {
 
 /** 分阶段解题流式回调。 */
 export interface SolutionStreamHandlers {
+  /** 开始处理某个子问题（多子问题时每个子问题开始时触发）。 */
+  onSubProblemStart?: (index: number, label: string, subProblem: string) => void;
   onPhaseStart: (phase: Phase) => void;
+  onPhaseChunk?: (phase: Phase, chunk: string) => void;
   onPhaseSteps: (phase: Phase, steps: SolutionStep[]) => void;
+  /** 某个子问题完成时触发（携带该子问题的最终答案）。 */
+  onSubProblemComplete?: (index: number, finalAnswer?: string) => void;
   onComplete: (solution: Solution) => void;
   signal?: AbortSignal;
 }
@@ -72,4 +77,12 @@ export interface ISolverEngine {
     ctx: SolverContext,
     handlers: StreamHandlers
   ): Promise<void>;
+
+  /** 对单小问求解（用于大题分小问独立重试）。 */
+  solveSubProblem?(
+    subProblemIndex: number,
+    subProblem: string,
+    ctx: SolverContext,
+    handlers: StreamHandlers
+  ): Promise<SolutionStep[]>;
 }

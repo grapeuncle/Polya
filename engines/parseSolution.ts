@@ -1,6 +1,7 @@
 // 从模型返回中解析 JSON 解题方案；容错处理代码块包裹与多余文本。
 import { normalizeSteps } from '../shared/normalizeStep';
-import { Phase, Solution, SolutionStep } from '../shared/types';
+import { Phase, Solution, SolutionStep, SubAnswer } from '../shared/types';
+import { sanitizeLatexJson } from './jsonSanitizer';
 
 export { normalizeSolutionStep, normalizeSteps } from '../shared/normalizeStep';
 
@@ -23,7 +24,8 @@ function extractSolutionJson(raw: string): Record<string, unknown> | null {
       continue;
     }
     try {
-      const obj = JSON.parse(candidate.slice(start, end + 1)) as Record<string, unknown>;
+      const jsonText = sanitizeLatexJson(candidate.slice(start, end + 1));
+      const obj = JSON.parse(jsonText) as Record<string, unknown>;
       if (Array.isArray(obj.steps)) {
         return obj;
       }
@@ -46,11 +48,27 @@ export function parseSolution(raw: string, problem: string): Solution {
     );
   }
   const steps = normalizeSteps(obj.steps);
+  const subAnswers = parseSubAnswers(obj.subAnswers);
   return {
     problem: (typeof obj.problem === 'string' ? obj.problem : undefined) || problem,
     finalAnswer: typeof obj.finalAnswer === 'string' ? obj.finalAnswer : undefined,
     steps,
+    subAnswers: subAnswers.length > 0 ? subAnswers : undefined,
   };
+}
+
+function parseSubAnswers(raw: unknown): SubAnswer[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(
+      (item): item is Record<string, unknown> =>
+        typeof item === 'object' && item !== null && typeof item.id === 'number'
+    )
+    .map((item) => ({
+      id: Number(item.id),
+      label: typeof item.label === 'string' ? item.label : `（${item.id}）`,
+      answer: typeof item.answer === 'string' ? item.answer : '',
+    }));
 }
 
 /** 从阶段 JSON 中解析该阶段的步骤列表。 */

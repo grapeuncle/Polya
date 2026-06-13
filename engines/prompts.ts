@@ -7,6 +7,7 @@ import {
   Phase,
   SolutionStep,
   SolverContext,
+  SubProblemSolution,
 } from '../shared/types';
 
 /** 难度对应的措辞指引。 */
@@ -32,16 +33,24 @@ export const SYSTEM_PROMPT = `你是一位精通乔治·波利亚（George Póly
 - 解释要循序渐进，强调"为什么这样做"而非仅仅"怎么做"。
 - 所有回答必须使用简体中文。
 - 数学公式使用 LaTeX，行内用 $...$，独立公式用 $$...$$。
-- 保持鼓励、耐心、清晰的语气。`;
+- **关键**：在 JSON 字符串中，LaTeX 命令的反斜杠必须双写（如 \\\\frac、\\\\sqrt、\\\\begin{aligned} 等）。例如 JSON 中写为 \\\\frac{a}{b} 才能解析为正确的 \\frac{a}{b}。
+- JSON 中换行用 \\n（单反斜杠），LaTeX 命令用 \\\\（双反斜杠），两者不同请严格区分。
+- 保持鼓励、耐心、清晰的语气。
+- 文本排版要求：在 JSON content 字段中直接使用 Markdown 格式（\\n 换行，\\n\\n 分段，- 无序列表，**加粗**，标题等）。每个自然句独占一行，不同主题或不同要点之间用空行分隔。JSON 字符串中的 \\n 会被正确解析为换行，请放心使用。
+
+多子问题处理原则：
+- 当题目包含多个小问（如（1）（2）（3））时，系统会依次独立处理每个小问。
+- 你被要求处理某一个小问的某个阶段时，请严格聚焦于该小问，不要混入其他小问的内容。
+- 若某小问依赖于前序小问的结果，系统会将前序结果作为已知条件提供。
+- 每个小问都应独立经历完整的四阶段解题过程。`;
 
 /** 生成完整解题方案时使用的提示词，要求模型输出结构化 JSON。 */
 export function buildSolutionPrompt(problem: string, difficulty: Difficulty): string {
   return `请按照波利亚四阶段，求解以下数学题，并输出**严格的 JSON**（不要包含 Markdown 代码块标记）。
 
-题目：
-"""
+<problem>
 ${problem}
-"""
+</problem>
 
 ${DIFFICULTY_GUIDE[difficulty]}
 
@@ -49,11 +58,12 @@ ${DIFFICULTY_GUIDE[difficulty]}
 {
   "problem": "原题",
   "finalAnswer": "最终答案（用 LaTeX）",
+  "subAnswers": "[{\"id\": 1, \"label\": \"（1）\", \"answer\": \"答案（LaTeX）\"}]（若题目含多小问）",
   "steps": [
     {
       "id": "唯一字符串",
       "phase": "understanding | devising | carrying-out | looking-back",
-      "content": "该步主要文本，可含 $LaTeX$",
+      "content": "该步主要文本，可含 $LaTeX$。多条要点请逐条换行，不同主题间空一行。",
       "rawLatex": "可选，纯公式",
       "subSteps": [可选，执行阶段至少一步应含子推导],
       "metadata": {
@@ -71,6 +81,7 @@ ${DIFFICULTY_GUIDE[difficulty]}
 - 四个阶段都要有至少一个步骤，顺序为 understanding → devising → carrying-out → looking-back。
 - carrying-out 阶段至少一个步骤包含 subSteps 数组（2-4 个子步骤）。
 - 每个 step 的 id 必须唯一，metadata 不可省略。
+- JSON 中 LaTeX 命令必须双写反斜杠（\\\\frac 而非 \\frac），换行用 \\n（单反斜杠）。
 - 只输出 JSON，不要任何额外解释文字。`;
 }
 
@@ -82,18 +93,41 @@ export function buildPhaseSolutionPrompt(
   priorSteps: SolutionStep[]
 ): string {
   const priorBrief = priorSteps
-    .map((s, i) => `  ${i + 1}. [${PHASE_META[s.phase].title}] ${s.content}`)
-    .join('\n');
+    .map((s, i) => {
+      const meta = [];
+      if (s.metadata.objective) meta.push(`目的：${s.metadata.objective}`);
+      if (s.metadata.heuristic) meta.push(`思路：${s.metadata.heuristic}`);
+      const metaStr = meta.length > 0 ? `（${meta.join('；')}）` : '';
+      return `  ${i + 1}. [${PHASE_META[s.phase].title}]${metaStr}\n  ${s.content}`;
+    })
+    .join('\n\n');
+  // 阶段特化要求
+  const phaseSpecificRules: string[] = [];
+  if (phase === 'devising') {
+    phaseSpecificRules.push(
+      '请列出至少 2 种可行解法/策略，用一两句话简评每种方案的优劣。若某个方案确实没有明显劣势，请直接说"无明显劣势"，切勿硬凑缺点。然后明确选中推荐方案并说明选择理由。所选方案将在后续 carrying-out 阶段执行。'
+    );
+  }
+  if (phase === 'looking-back') {
+    phaseSpecificRules.push(
+      '回顾请用精炼的 3-5 句话总结，重点覆盖：①所用的验证方法；②常见易错点；③可推广的数学思想或变式方向。',
+      '禁止长篇自我质疑/纠错过程（如"等等，这里可能错了……让我们重新计算……"）。如果之前步骤有误，直接说明正确的做法即可，不要模拟犯错再修正的过程。',
+      '若在回顾中提出替代解法或参数化方法，必须给出完整推导直到最终结论，不得半途而废（如写到一半说"需要调整"却没有给出正确结果）。'
+    );
+  }
+  const extraRules = phaseSpecificRules.length > 0
+    ? `\n\n本阶段附加要求：\n${phaseSpecificRules.map((r) => `- ${r}`).join('\n')}`
+    : '';
+
   return `请针对以下数学题，仅生成波利亚「${PHASE_META[phase].title}」（phase=${phase}）阶段的步骤，输出**严格 JSON**（不要 Markdown 代码块）。
 
-题目：
-"""
+<problem>
 ${problem}
-"""
+</problem>
 
 ${priorBrief ? `已生成的前序步骤：\n${priorBrief}\n` : ''}
 
-${DIFFICULTY_GUIDE[difficulty]}
+${DIFFICULTY_GUIDE[difficulty]}${extraRules}
 
 输出 JSON 结构：
 {
@@ -101,15 +135,93 @@ ${DIFFICULTY_GUIDE[difficulty]}
     {
       "id": "唯一字符串",
       "phase": "${phase}",
-      "content": "该步主要文本，可含 $LaTeX$",
+      "content": "该步主要文本，可含 $LaTeX$。在 JSON 字符串内直接使用 \\n\\n 分段，支持 Markdown 列表（-）和加粗（**）。多条要点逐条换行，不同主题间空一行。注意：JSON 中 LaTeX 命令的反斜杠必须双写，如 \\\\frac、\\\\sqrt 等。",
       "subSteps": [可选，执行阶段建议含 2-4 个子步骤],
       "metadata": { "objective": "...", "heuristic": "...", "theoremApplied": "...", "commonMistake": "..." }
     }
   ],
-  "finalAnswer": "仅 looking-back 阶段可给出最终答案 LaTeX，其他阶段省略此字段"
+  "finalAnswer": "仅 looking-back 阶段可给出最终答案 LaTeX，其他阶段省略此字段",
+  "subAnswers": ${phase === 'looking-back'
+    ? '[{"id": 1, "label": "（1）", "answer": "LaTeX 答案"}, ...]'
+    : '仅 looking-back 阶段可选，格式为 [{"id": 1, "label": "（1）", "answer": "答案"}]'
+  }
 }
 
-要求：本回复只包含 ${PHASE_META[phase].title} 阶段的 1-2 个步骤，phase 必须为 ${phase}。只输出 JSON。`;
+要求：本回复只包含 ${PHASE_META[phase].title} 阶段的 1-2 个步骤，phase 必须为 ${phase}。只输出 JSON。JSON 中 LaTeX 命令必须双写反斜杠（\\\\frac 而非 \\frac）。${phase === 'looking-back' ? '\n若题目包含多个小问（如（1）（2）（3）（4）），请在 subAnswers 数组中为每个小问提供独立的结构化答案。' : ''}`;
+}
+
+/** 为多子问题场景中单个子问题的单个阶段构建提示词。 */
+export function buildSubProblemPhasePrompt(
+  problem: string,
+  subProblem: string,
+  subIndex: number,
+  phase: Phase,
+  difficulty: Difficulty,
+  priorSubResults: { index: number; label: string; finalAnswer?: string }[],
+  priorSteps: SolutionStep[]
+): string {
+  const priorResultsBlock = priorSubResults.length > 0
+    ? `前面子问题的结果（作为本小问的已知条件）：\n` +
+      priorSubResults
+        .map((s) => `  第 ${s.index} 小问${s.finalAnswer ? ` 答案：${s.finalAnswer}` : '（尚未完成）'}`)
+        .join('\n') + '\n'
+    : '';
+
+  const priorBrief = priorSteps
+    .map((s, i) => {
+      const meta = [];
+      if (s.metadata.objective) meta.push(`目的：${s.metadata.objective}`);
+      if (s.metadata.heuristic) meta.push(`思路：${s.metadata.heuristic}`);
+      const metaStr = meta.length > 0 ? `（${meta.join('；')}）` : '';
+      return `  ${i + 1}. [${PHASE_META[s.phase].title}]${metaStr}\n  ${s.content}`;
+    })
+    .join('\n\n');
+
+  const phaseSpecificRules: string[] = [];
+  if (phase === 'devising') {
+    phaseSpecificRules.push(
+      '请列出至少 2 种可行解法/策略，用一两句话简评每种方案的优劣。若某个方案确实明显没有劣势，请直接说"好方案，无明显缺点"，切勿硬凑缺点。然后明确选中推荐方案并说明选择理由。'
+    );
+  }
+  if (phase === 'looking-back') {
+    phaseSpecificRules.push(
+      '回顾请用精炼的 3-5 句话总结，重点覆盖：①所用的验证方法；②常见易错点；③可推广的数学思想。',
+      '禁止长篇自我质疑/纠错过程。如果之前步骤有误，直接说明正确的做法即可。'
+    );
+  }
+  const extraRules = phaseSpecificRules.length > 0
+    ? `\n\n本阶段附加要求：\n${phaseSpecificRules.map((r) => `- ${r}`).join('\n')}`
+    : '';
+
+  return `原题包含多个小问。请仅针对第 ${subIndex} 小问，生成波利亚「${PHASE_META[phase].title}」阶段的步骤，输出**严格 JSON**（不要 Markdown 代码块）。
+
+<problem>
+完整原题：${problem}
+
+当前聚焦：第 ${subIndex} 小问
+${subProblem}
+</problem>
+
+${priorResultsBlock}
+${priorBrief ? `本小问已生成的前序步骤：\n${priorBrief}\n` : ''}
+
+${DIFFICULTY_GUIDE[difficulty]}${extraRules}
+
+输出 JSON 结构：
+{
+  "steps": [
+    {
+      "id": "唯一字符串（建议以 sub${subIndex}- 开头）",
+      "phase": "${phase}",
+      "content": "该步主要文本，可含 $LaTeX$。在 JSON 字符串内直接使用 \\n\\n 分段，支持 Markdown 列表（-）和加粗（**）。多条要点逐条换行，不同主题间空一行。注意：JSON 中 LaTeX 命令的反斜杠必须双写，如 \\\\frac、\\\\sqrt 等。",
+      "subSteps": [可选，执行阶段建议含 2-4 个子步骤],
+      "metadata": { "objective": "...", "heuristic": "...", "theoremApplied": "...", "commonMistake": "..." }
+    }
+  ],
+  "finalAnswer": ${phase === 'looking-back' ? '"本小问最终答案 LaTeX"' : '仅 looking-back 阶段可给出最终答案 LaTeX，其他阶段省略此字段'}
+}
+
+要求：本回复只包含第 ${subIndex} 小问的 ${PHASE_META[phase].title} 阶段 1-2 个步骤，phase 必须为 ${phase}。只输出 JSON。JSON 中 LaTeX 命令必须双写反斜杠（\\\\frac 而非 \\frac）。`;
 }
 
 function formatThread(thread: ConversationThread | undefined): string {
@@ -253,8 +365,8 @@ SVG 示例：
 
 function buildContextBlock(ctx: SolverContext, stepId?: string): string {
   const stepsBrief = ctx.steps
-    .map((s, i) => `  ${i + 1}. [${PHASE_META[s.phase].title}] ${s.content}`)
-    .join('\n');
+    .map((s, i) => `  ${i + 1}. [${PHASE_META[s.phase].title}]\n  ${s.content}`)
+    .join('\n\n');
   const threadKey = stepId ?? '__global__';
   const thread = ctx.conversationThreads?.[threadKey];
   return `# 当前题目
@@ -292,7 +404,7 @@ ${focus}${selectionBlock}
 ${actionInstruction(action, step, question, selection)}
 
 ${DIFFICULTY_GUIDE[ctx.difficulty]}
-请用简体中文回答，公式使用 LaTeX（行内 $...$，独立 $$...$$）。`;
+请用简体中文回答。回答为纯 Markdown 格式，公式使用 LaTeX（行内 $...$，独立 $$...$$）。用 ## 或 ### 标记章节，- 做列表，\\n\\n 分段。`;
 }
 
 export function buildGlobalAskPrompt(question: string, ctx: SolverContext): string {
@@ -306,7 +418,7 @@ ${question}
 ${formatThread(thread)}
 
 请结合整道题的上下文作答。${DIFFICULTY_GUIDE[ctx.difficulty]}
-用简体中文，公式使用 LaTeX。`;
+用简体中文，回答为纯 Markdown 格式。公式使用 LaTeX（行内 $...$，独立 $$...$$），用 \\n\\n 分段。`;
 }
 
 export function buildContinueBranchPrompt(
@@ -316,7 +428,7 @@ export function buildContinueBranchPrompt(
 ): string {
   const branchBrief = branchSteps
     .map((s, i) => `  ${i + 1}. ${s.content}`)
-    .join('\n');
+    .join('\n\n');
   return `${buildContextBlock(ctx)}
 
 # 当前分支
@@ -329,5 +441,50 @@ ${branchBrief}
 {"branchSteps":[{"id":"唯一id","phase":"carrying-out","content":"...","metadata":{}}]}
 
 ${DIFFICULTY_GUIDE[ctx.difficulty]}
-只输出 JSON，不要额外文字。`;
+只输出 JSON，不要额外文字。JSON 中 LaTeX 命令必须双写反斜杠。`;
+}
+
+/** 针对大题中单个小问的解题 prompt。传入问题原始题干和具体小问文本，以及已完成的前序步骤。 */
+export function buildSubProblemPrompt(
+  problem: string,
+  subProblem: string,
+  subIndex: number,
+  difficulty: Difficulty,
+  priorSteps: SolutionStep[]
+): string {
+  const priorBrief = priorSteps
+    .map((s, i) => {
+      const meta = [];
+      if (s.metadata.objective) meta.push(`目的：${s.metadata.objective}`);
+      const metaStr = meta.length > 0 ? `（${meta.join('；')}）` : '';
+      return `  ${i + 1}. [${PHASE_META[s.phase].title}]${metaStr}\n  ${s.content}`;
+    })
+    .join('\n\n');
+
+  return `请仅针对以下数学题的第 ${subIndex} 小问，生成波利亚执行方案（carrying-out）阶段的解题步骤并给出最终答案，输出**严格 JSON**（不要 Markdown 代码块）。
+
+<problem>
+原题：${problem}
+
+第 ${subIndex} 小问：${subProblem}
+</problem>
+
+${priorBrief ? `已生成的前序步骤（来自整体解题）：\n${priorBrief}\n` : ''}
+
+${DIFFICULTY_GUIDE[difficulty]}
+
+输出 JSON 结构：
+{
+  "steps": [
+    {
+      "id": "sub-${subIndex}-1",
+      "phase": "carrying-out",
+      "content": "该步主要文本，可含 $LaTeX$。在 JSON 字符串内直接使用 \\n\\n 分段，支持 Markdown 列表（-）和加粗（**）。多条要点逐条换行，不同主题间空一行。注意：JSON 中 LaTeX 命令的反斜杠必须双写，如 \\\\frac、\\\\sqrt 等。",
+      "metadata": { "objective": "...", "heuristic": "...", "theoremApplied": "...", "commonMistake": "..." }
+    }
+  ],
+  "finalAnswer": "本小问的最终答案 LaTeX"
+}
+
+要求：本回复只包含该小问的 1-3 个 carrying-out 步骤，phase 必须为 carrying-out。只输出 JSON。JSON 中 LaTeX 命令必须双写反斜杠。`;
 }

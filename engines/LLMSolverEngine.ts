@@ -3,11 +3,14 @@
 import { ISolverEngine, SolutionStreamHandlers, StreamHandlers } from './ISolverEngine';
 import {
   MenuActionId,
+  Phase,
   PHASE_ORDER,
   Solution,
   SolutionStep,
   SolverContext,
+  SubProblemSolution,
 } from '../shared/types';
+import { detectSubProblems } from '../shared/subProblemDetector';
 import { parseActionOutput } from './parseActionOutput';
 import { parsePhaseSteps, parseSolution } from './parseSolution';
 import {
@@ -17,7 +20,10 @@ import {
   buildGlobalAskPrompt,
   buildPhaseSolutionPrompt,
   buildSolutionPrompt,
+  buildSubProblemPhasePrompt,
+  buildSubProblemPrompt,
 } from './prompts';
+import { sanitizeLatexJson } from './jsonSanitizer';
 
 export type LLMProvider = 'openai' | 'anthropic' | 'deepseek';
 
@@ -51,6 +57,144 @@ export class LLMSolverEngine implements ISolverEngine {
     ctx: SolverContext,
     handlers: SolutionStreamHandlers
   ): Promise<Solution> {
+    // 1. 检测是否包含多个子问题
+    const subProblems = detectSubProblems(problem);
+
+    if (subProblems.length === 0) {
+      // 无子问题，走原来的单题四阶段流程
+      return this.solveSingleProblem(problem, ctx, handlers);
+    }
+
+    // 2. 依次处理每个子问题：每个子问题独立走完四阶段
+    const allSteps: SolutionStep[] = [];
+    const subSolutions: SubProblemSolution[] = [];
+    const subAnswers: { id: number; label: string; answer: string }[] = [];
+    const completedResults: { index: number; label: string; finalAnswer?: string }[] = [];
+
+    for (const sub of subProblems) {
+      if (handlers.signal?.aborted) {
+        break;
+      }
+
+      handlers.onSubProblemStart?.(sub.index, sub.label, sub.text);
+
+      const subSteps: SolutionStep[] = [];
+      let subFinalAnswer: string | undefined;
+
+      // 构建当前子问题的上下文（含前面子问题的结果）
+      const subCtx: SolverContext = {
+        ...ctx,
+        currentSubProblemIndex: sub.index,
+        completedSubResults: completedResults,
+      };
+
+      for (const phase of PHASE_ORDER) {
+        if (handlers.signal?.aborted) {
+          break;
+        }
+
+        handlers.onPhaseStart(phase);
+
+        const prompt = buildSubProblemPhasePrompt(
+          problem,
+          sub.text,
+          sub.index,
+          phase,
+          ctx.difficulty,
+          completedResults,
+          subSteps
+        );
+
+        let raw = '';
+        await this.streamChat(SYSTEM_PROMPT, prompt, {
+          onChunk: (c) => {
+            raw += c;
+            handlers.onPhaseChunk?.(phase, c);
+          },
+          signal: handlers.signal,
+        });
+
+        const phaseSteps = parsePhaseSteps(raw, phase);
+        if (phaseSteps.length === 0) {
+          continue;
+        }
+
+        // 标记步骤属于当前子问题
+        for (const s of phaseSteps) {
+          s.subProblemIndex = sub.index;
+        }
+
+        subSteps.push(...phaseSteps);
+        allSteps.push(...phaseSteps);
+        handlers.onPhaseSteps(phase, phaseSteps);
+
+        // 尝试从 looking-back 阶段提取 finalAnswer
+        if (phase === 'looking-back') {
+          try {
+            const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+            const jsonText = fence ? fence[1] : raw;
+            const start = jsonText.indexOf('{');
+            const end = jsonText.lastIndexOf('}');
+            if (start >= 0 && end > start) {
+              const sanitized = sanitizeLatexJson(jsonText.slice(start, end + 1));
+              const obj = JSON.parse(sanitized);
+              if (obj.finalAnswer) {
+                subFinalAnswer = obj.finalAnswer;
+              }
+            }
+          } catch {
+            // ignore parse errors
+          }
+        }
+      }
+
+      // 记录当前子问题的完整结果
+      const phasesMap: Partial<Record<Phase, SolutionStep[]>> = {};
+      for (const phase of PHASE_ORDER) {
+        const ps = subSteps.filter((s) => s.phase === phase);
+        if (ps.length > 0) {
+          phasesMap[phase] = ps;
+        }
+      }
+
+      subSolutions.push({
+        index: sub.index,
+        label: sub.label,
+        subProblem: sub.text,
+        phases: phasesMap,
+        finalAnswer: subFinalAnswer,
+      });
+
+      if (subFinalAnswer) {
+        subAnswers.push({ id: sub.index, label: sub.label, answer: subFinalAnswer });
+      }
+
+      completedResults.push({
+        index: sub.index,
+        label: sub.label,
+        finalAnswer: subFinalAnswer,
+      });
+
+      handlers.onSubProblemComplete?.(sub.index, subFinalAnswer);
+    }
+
+    // 组装最终结果
+    const solution: Solution = {
+      problem,
+      steps: allSteps,
+      subAnswers: subAnswers.length > 0 ? subAnswers : undefined,
+      subSolutions: subSolutions.length > 0 ? subSolutions : undefined,
+    };
+    handlers.onComplete(solution);
+    return solution;
+  }
+
+  /** 单题四阶段解题（原逻辑，从 generateSolutionStreaming 中抽离）。 */
+  private async solveSingleProblem(
+    problem: string,
+    ctx: SolverContext,
+    handlers: SolutionStreamHandlers
+  ): Promise<Solution> {
     const allSteps: SolutionStep[] = [];
     let finalAnswer: string | undefined;
 
@@ -64,6 +208,7 @@ export class LLMSolverEngine implements ISolverEngine {
       await this.streamChat(SYSTEM_PROMPT, prompt, {
         onChunk: (c) => {
           raw += c;
+          handlers.onPhaseChunk?.(phase, c);
         },
         signal: handlers.signal,
       });
@@ -80,7 +225,8 @@ export class LLMSolverEngine implements ISolverEngine {
         const start = jsonText.indexOf('{');
         const end = jsonText.lastIndexOf('}');
         if (start >= 0 && end > start) {
-          const obj = JSON.parse(jsonText.slice(start, end + 1));
+          const sanitized = sanitizeLatexJson(jsonText.slice(start, end + 1));
+          const obj = JSON.parse(sanitized);
           if (obj.finalAnswer) {
             finalAnswer = obj.finalAnswer;
           }
@@ -144,6 +290,44 @@ export class LLMSolverEngine implements ISolverEngine {
   async globalAsk(question: string, ctx: SolverContext, handlers: StreamHandlers): Promise<void> {
     const prompt = buildGlobalAskPrompt(question, ctx);
     await this.streamChatWithMeta(SYSTEM_PROMPT, prompt, 'ask', handlers);
+  }
+
+  async solveSubProblem(
+    subProblemIndex: number,
+    subProblem: string,
+    ctx: SolverContext,
+    handlers: StreamHandlers
+  ): Promise<SolutionStep[]> {
+    const prompt = buildSubProblemPrompt(ctx.problem, subProblem, subProblemIndex, ctx.difficulty, ctx.steps);
+    let raw = '';
+    await this.streamChat(SYSTEM_PROMPT, prompt, {
+      onChunk: (c) => {
+        raw += c;
+        handlers.onChunk(c);
+      },
+      signal: handlers.signal,
+    });
+    const steps = parsePhaseSteps(raw, 'carrying-out');
+    if (handlers.onMeta) {
+      let finalAnswer: string | undefined;
+      try {
+        const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+        const jsonText = fence ? fence[1] : raw;
+        const start = jsonText.indexOf('{');
+        const end = jsonText.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+          const sanitized = sanitizeLatexJson(jsonText.slice(start, end + 1));
+          const obj = JSON.parse(sanitized);
+          if (obj.finalAnswer) finalAnswer = obj.finalAnswer as string;
+        }
+      } catch { /* ignore */ }
+      handlers.onMeta({
+        kind: 'text',
+        title: `第 ${subProblemIndex} 小问答案`,
+        ...(finalAnswer ? {} : {}),
+      });
+    }
+    return steps;
   }
 
   /** 流式输出并在结束时解析结构化 meta。 */

@@ -2,9 +2,16 @@
 import { ISolverEngine, StreamHandlers } from '../engines/ISolverEngine';
 import { createEngine } from '../engines/factory';
 import {
+  formatSymbolicVerification,
+  SymbolicVerification,
+  verifyEquations,
+} from '../engines/symbolicVerifier';
+import {
+  ActionResultMeta,
   ConversationMessage,
   Difficulty,
   ExtToWebviewMessage,
+  MenuActionId,
   Phase,
   SolutionBranch,
   SolutionStep,
@@ -12,6 +19,9 @@ import {
   WebviewToExtMessage,
 } from '../shared/types';
 import { AppConfig } from '../shared/appConfig';
+
+/** 需要符号引擎客观兜底的「验证类」动作。 */
+const SYMBOLIC_VERIFY_ACTIONS = new Set<MenuActionId>(['verify', 'checkCalculation', 'verifyAnswer']);
 
 export interface SessionPrefs {
   difficulty: Difficulty;
@@ -142,11 +152,39 @@ export class SolverService {
         },
       });
       this.steps = solution.steps;
+      this.runBackgroundSymbolicCheck();
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       this.emit({ type: 'solveError', message });
     } finally {
       clearInterval(heartbeatTimer);
+    }
+  }
+
+  /**
+   * 后台静默符号校验：解题完成后自动全量运行。
+   * 只有「可证明的矛盾」才推送上卡；verified / conditional 属于正常情况，不打扰学生。
+   */
+  private runBackgroundSymbolicCheck(): void {
+    try {
+      const warnings: { stepId: string; expression: string; detail: string }[] = [];
+      const walk = (steps: SolutionStep[]): void => {
+        for (const s of steps) {
+          const v = verifyEquations(s.content);
+          for (const c of v.checks) {
+            if (c.verdict === 'contradiction') {
+              warnings.push({ stepId: s.id, expression: c.expression, detail: c.detail });
+            }
+          }
+          if (s.subSteps?.length) {
+            walk(s.subSteps);
+          }
+        }
+      };
+      walk(this.steps);
+      this.emit({ type: 'symbolicCheck', warnings, checkedSteps: this.steps.length });
+    } catch {
+      // 后台校验失败静默降级，不影响主流程
     }
   }
 
@@ -168,7 +206,20 @@ export class SolverService {
         this.engine = await createEngine(this.appConfig);
       }
       const ctx = this.buildContext(stepId, undefined, selectedText);
-      let meta;
+      // 符号引擎客观校验（P0）：先于 AI 输出确定性结论，矛盾时强制 warning。
+      let symbolic: SymbolicVerification | null = null;
+      if (SYMBOLIC_VERIFY_ACTIONS.has(action) && ctx.focusedStep) {
+        try {
+          symbolic = verifyEquations(ctx.focusedStep.content);
+        } catch {
+          symbolic = null;
+        }
+        const section = symbolic ? formatSymbolicVerification(symbolic) : '';
+        if (section) {
+          this.emit({ type: 'actionChunk', requestId, chunk: `${section}\n\n---\n\n` });
+        }
+      }
+      let meta: ActionResultMeta | undefined;
       const wrapped: StreamHandlers = {
         ...handlers,
         onMeta: (m) => {
@@ -179,6 +230,20 @@ export class SolverService {
         await this.engine.checkStep(stepId, ctx, wrapped);
       } else {
         await this.engine.explainStep(action, stepId, ctx, wrapped, question, selectedText);
+      }
+      if (symbolic && symbolic.contradictionCount > 0) {
+        const symbolicHighlights = symbolic.checks
+          .filter((c) => c.verdict === 'contradiction')
+          .map((c) => ({
+            target: 'step' as const,
+            message: `符号引擎：${c.expression} —— ${c.detail}`,
+          }));
+        meta = {
+          ...(meta ?? {}),
+          kind: 'warning',
+          title: meta?.title ?? '符号校验发现矛盾',
+          highlights: [...(meta?.highlights ?? []), ...symbolicHighlights],
+        };
       }
       this.emit({ type: 'actionEnd', requestId, meta });
     } catch (e: unknown) {

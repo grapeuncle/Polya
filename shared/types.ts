@@ -196,6 +196,13 @@ export interface ConversationMessage {
   time: number;
 }
 
+/** 后台符号校验发现的单条可证明矛盾。 */
+export interface SymbolicStepWarning {
+  stepId: string;
+  expression: string;
+  detail: string;
+}
+
 /** 多轮对话线程。 */
 export interface ConversationThread {
   stepId: string;
@@ -311,6 +318,8 @@ export type ExtToWebviewMessage =
   | { type: 'solutionHeartbeat'; phase: Phase; elapsedMs: number }
   | { type: 'solution'; solution: Solution }
   | { type: 'solveError'; message: string }
+  // 后台静默符号校验结果：仅携带可证明的矛盾；空数组表示全部通过。
+  | { type: 'symbolicCheck'; warnings: SymbolicStepWarning[]; checkedSteps: number }
   | { type: 'subProblemStart'; index: number; label: string; subProblem: string }
   | { type: 'subProblemPhaseSteps'; index: number; phase: Phase; steps: SolutionStep[] }
   | { type: 'subProblemComplete'; index: number; finalAnswer?: string }

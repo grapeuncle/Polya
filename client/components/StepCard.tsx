@@ -53,6 +53,10 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
 
   const hasWarning = usePolyaStore((s) => s.getStepWarning(step.id));
 
+  const symbolicWarnings = usePolyaStore((s) => s.symbolicWarnings[step.id]);
+
+  const hasSymbolicWarning = (symbolicWarnings?.length ?? 0) > 0;
+
 
 
   const meta = step.metadata;
@@ -139,7 +143,7 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
 
       ref={cardRef}
 
-      className={`step-card ${selected ? 'selected' : ''} ${flagged ? 'flagged' : ''} ${hasWarning ? 'step-warning' : ''}`}
+      className={`step-card ${selected ? 'selected' : ''} ${flagged ? 'flagged' : ''} ${hasWarning || hasSymbolicWarning ? 'step-warning' : ''}`}
 
       onMouseUp={(e) => {
 
@@ -189,6 +193,12 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
 
         {flagged && <span className="flag-badge codicon codicon-bookmark" title="疑难步骤" />}
 
+        {hasSymbolicWarning && (
+
+          <span className="symbolic-warn-badge codicon codicon-error" title="后台符号校验发现矛盾" />
+
+        )}
+
       </div>
 
 
@@ -198,6 +208,38 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
         <MarkdownView content={step.content} />
 
       </div>
+
+
+
+      {hasSymbolicWarning && (
+
+        <div className="symbolic-warn" onClick={(e) => e.stopPropagation()}>
+
+          <div className="symbolic-warn-title">
+
+            <span className="codicon codicon-error" /> 符号校验发现 {symbolicWarnings.length} 处可证明的矛盾
+
+          </div>
+
+          <ul>
+
+            {symbolicWarnings.map((w, i) => (
+
+              <li key={i}>
+
+                <code>{w.expression}</code> —— {w.detail}
+
+              </li>
+
+            ))}
+
+          </ul>
+
+          <div className="symbolic-warn-tip">这是 mathjs 客观校验结果（与 AI 无关），请点击「检验这一步」复核。</div>
+
+        </div>
+
+      )}
 
 
 

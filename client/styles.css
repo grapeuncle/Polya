@@ -654,6 +654,72 @@ details.meta-row summary {
   color: var(--accent-fg);
   border-color: var(--accent);
 }
+.menu-btn.core {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.menu-btn.core:hover {
+  filter: brightness(1.15);
+}
+.menu-row-util {
+  margin-top: 6px;
+}
+.menu-experimental {
+  margin-top: 8px;
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+}
+.menu-experimental > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  user-select: none;
+}
+.menu-experimental > summary:hover {
+  color: var(--vscode-foreground, inherit);
+}
+.menu-experimental[open] > summary {
+  margin-bottom: 8px;
+}
+/* 后台符号校验警示 */
+.symbolic-warn-badge {
+  color: var(--vscode-errorForeground, #f14c4c);
+  margin-left: auto;
+}
+.symbolic-warn {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-errorForeground, #f14c4c);
+  border-radius: 6px;
+  background: rgba(241, 76, 76, 0.08);
+  font-size: 12px;
+}
+.symbolic-warn-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--vscode-errorForeground, #f14c4c);
+  margin-bottom: 6px;
+}
+.symbolic-warn ul {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+.symbolic-warn li {
+  margin-bottom: 2px;
+}
+.symbolic-warn code {
+  background: rgba(127, 127, 127, 0.15);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.symbolic-warn-tip {
+  color: var(--muted);
+  font-size: 11px;
+}
 .menu-btn.active {
   background: var(--vscode-charts-orange, #e08a00);
   color: #fff;

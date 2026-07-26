@@ -90,6 +90,16 @@ export const FloatingMenu: React.FC<{ step: SolutionStep }> = ({ step }) => {
 
   const phaseActions = PHASE_ACTIONS[step.phase] ?? [];
 
+  // MVP 收敛：一级仅展示核心三件套（解释 / 检验 / 追问）+ 复制 / 标记工具；
+  // 其余通用动作与阶段专属动作折叠进「更多功能（实验）」。
+  const coreActions = COMMON_ACTIONS.filter((a) => a.core);
+
+  const utilityActions = COMMON_ACTIONS.filter((a) => a.frontendOnly);
+
+  const extendedCommon = COMMON_ACTIONS.filter((a) => !a.core && !a.frontendOnly);
+
+  const experimentalCount = extendedCommon.length + phaseActions.length;
+
 
 
   const renderButton = (item: MenuItemConfig) => (
@@ -98,7 +108,7 @@ export const FloatingMenu: React.FC<{ step: SolutionStep }> = ({ step }) => {
 
       key={item.id}
 
-      className={`menu-btn ${item.id === 'flag' && flagged ? 'active' : ''}`}
+      className={`menu-btn ${item.core ? 'core' : ''} ${item.id === 'flag' && flagged ? 'active' : ''}`}
 
       title={item.tip}
 
@@ -132,19 +142,39 @@ export const FloatingMenu: React.FC<{ step: SolutionStep }> = ({ step }) => {
 
       <div className="menu-group">
 
-        <div className="menu-group-title">通用操作</div>
+        <div className="menu-group-title">核心辅导</div>
 
-        <div className="menu-row">{COMMON_ACTIONS.map(renderButton)}</div>
-
-      </div>
-
-      <div className="menu-group">
-
-        <div className="menu-group-title">阶段专属</div>
-
-        <div className="menu-row">{phaseActions.map(renderButton)}</div>
+        <div className="menu-row">{coreActions.map(renderButton)}</div>
 
       </div>
+
+      <div className="menu-row menu-row-util">{utilityActions.map(renderButton)}</div>
+
+      <details className="menu-experimental">
+
+        <summary>更多功能（实验）· {experimentalCount} 项</summary>
+
+        <div className="menu-group">
+
+          <div className="menu-group-title">通用</div>
+
+          <div className="menu-row">{extendedCommon.map(renderButton)}</div>
+
+        </div>
+
+        {phaseActions.length > 0 && (
+
+          <div className="menu-group">
+
+            <div className="menu-group-title">阶段专属</div>
+
+            <div className="menu-row">{phaseActions.map(renderButton)}</div>
+
+          </div>
+
+        )}
+
+      </details>
 
       {threads.length > 0 && (
 

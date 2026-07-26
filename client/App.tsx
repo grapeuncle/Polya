@@ -37,6 +37,7 @@ export const App: React.FC = () => {
   const onActionError = usePolyaStore((s) => s.onActionError);
   const onActionCancelled = usePolyaStore((s) => s.onActionCancelled);
   const confirmDifficultyRefresh = usePolyaStore((s) => s.confirmDifficultyRefresh);
+  const onSymbolicCheck = usePolyaStore((s) => s.onSymbolicCheck);
   const setViewMode = usePolyaStore((s) => s.setViewMode);
   const setShowFinalAnswer = usePolyaStore((s) => s.setShowFinalAnswer);
   const submitProblem = usePolyaStore((s) => s.submitProblem);
@@ -64,6 +65,9 @@ export const App: React.FC = () => {
           break;
         case 'solution':
           onSolution(msg.solution);
+          break;
+        case 'symbolicCheck':
+          onSymbolicCheck(msg.warnings, msg.checkedSteps);
           break;
         case 'branchStepsAppended':
           onBranchStepsAppended(msg.branchId, msg.steps);

@@ -13,6 +13,7 @@ import {
   SolutionBranch,
   SolutionStep,
   SubGoal,
+  SymbolicStepWarning,
 } from '../shared/types';
 import { normalizeSteps } from '../shared/normalizeStep';
 import { ACTION_TITLES, buildActionTitle, routeAction } from './actions/actionRouter';
@@ -102,6 +103,10 @@ interface PolyaState {
   subProblemStatus: Record<number, 'pending' | 'solving' | 'done'>;
   /** 用户当前选中查看的子问题索引（1-based），null 表示查看全部。 */
   selectedSubProblemIndex: number | null;
+  /** 后台符号校验发现的可证明矛盾（按步骤 id 分组）。 */
+  symbolicWarnings: Record<string, { expression: string; detail: string }[]>;
+  /** 后台符号校验覆盖的步骤数（null 表示尚未运行）。 */
+  symbolicCheckedSteps: number | null;
 
   setInputProblem: (v: string) => void;
   submitProblem: (problem: string) => void;
@@ -156,6 +161,7 @@ interface PolyaState {
   onSubProblemStart: (index: number, label: string, subProblem: string) => void;
   onSubProblemComplete: (index: number, finalAnswer?: string) => void;
   setSelectedSubProblem: (index: number | null) => void;
+  onSymbolicCheck: (warnings: SymbolicStepWarning[], checkedSteps: number) => void;
 }
 
 const MAX_BRANCHES = 3;
@@ -247,6 +253,8 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
   subProblems: [],
   subProblemStatus: {},
   selectedSubProblemIndex: null,
+  symbolicWarnings: {},
+  symbolicCheckedSteps: null,
 
   setInputProblem: (v) => set({ inputProblem: v }),
 
@@ -307,6 +315,8 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
       subProblems: [],
       subProblemStatus: {},
       selectedSubProblemIndex: null,
+      symbolicWarnings: {},
+      symbolicCheckedSteps: null,
     }),
 
   onSolutionPhaseStart: (phase) => set({ solvingPhase: phase }),
@@ -422,6 +432,17 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
       subProblemStatus: { ...s.subProblemStatus, [index]: 'done' },
     }));
     get().addHistory(`第 ${index} 小问求解完成`);
+  },
+
+  onSymbolicCheck: (warnings, checkedSteps) => {
+    const grouped: Record<string, { expression: string; detail: string }[]> = {};
+    for (const w of warnings) {
+      (grouped[w.stepId] ??= []).push({ expression: w.expression, detail: w.detail });
+    }
+    set({ symbolicWarnings: grouped, symbolicCheckedSteps: checkedSteps });
+    if (warnings.length > 0) {
+      showToast('error', `Polya：符号校验发现 ${warnings.length} 处可证明的矛盾，请核对标红步骤。`);
+    }
   },
 
   setSelectedSubProblem: (index) => {

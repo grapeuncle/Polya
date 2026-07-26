@@ -12,18 +12,20 @@ export interface MenuItemConfig {
   frontendOnly?: boolean;
   /** 是否需要弹出输入框（追问）。 */
   needsInput?: boolean;
+  /** MVP 核心动作：一级菜单高亮展示；其余折叠进「更多功能（实验）」。 */
+  core?: boolean;
 }
 
 /** 通用菜单：任意步骤都显示。 */
 export const COMMON_ACTIONS: MenuItemConfig[] = [
-  { id: 'explain', label: '解释这一步', icon: 'comment', tip: '用通俗语言解释此步骤' },
+  { id: 'explain', label: '解释这一步', icon: 'comment', tip: '用通俗语言解释此步骤', core: true },
   { id: 'objective', label: '这一步的目的', icon: 'target', tip: '此步骤想达成什么' },
   { id: 'why', label: '为什么这样做', icon: 'question', tip: '回溯推理依据' },
   { id: 'detail', label: '查看详细推导', icon: 'list-tree', tip: '展开逐步推导' },
   { id: 'alternatives', label: '还有其他方法吗', icon: 'git-branch', tip: '给出替代处理并对比' },
-  { id: 'verify', label: '检验这一步', icon: 'check', tip: '快速验算此步' },
+  { id: 'verify', label: '检验这一步', icon: 'check', tip: '客观校验已在后台自动完成；点此让 AI 进一步讲解这一步为何正确/有误', core: true },
   { id: 'commonMistake', label: '常见错误', icon: 'warning', tip: '如果做错了会怎样' },
-  { id: 'ask', label: '提问 / 追问', icon: 'mention', tip: '就此步骤提问', needsInput: true },
+  { id: 'ask', label: '提问 / 追问', icon: 'mention', tip: '就此步骤提问', needsInput: true, core: true },
   { id: 'copy', label: '复制', icon: 'copy', tip: '复制内容到剪贴板', frontendOnly: true },
   { id: 'flag', label: '标记疑难', icon: 'bookmark', tip: '标记为疑难步骤', frontendOnly: true },
 ];

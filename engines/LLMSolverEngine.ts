@@ -12,14 +12,13 @@ import {
 } from '../shared/types';
 import { detectSubProblems } from '../shared/subProblemDetector';
 import { parseActionOutput } from './parseActionOutput';
-import { parsePhaseSteps, parseSolution } from './parseSolution';
+import { parsePhaseSteps } from './parseSolution';
 import {
   SYSTEM_PROMPT,
   buildActionPrompt,
   buildContinueBranchPrompt,
   buildGlobalAskPrompt,
   buildPhaseSolutionPrompt,
-  buildSolutionPrompt,
   buildSubProblemPhasePrompt,
   buildSubProblemPrompt,
 } from './prompts';
@@ -80,13 +79,6 @@ export class LLMSolverEngine implements ISolverEngine {
 
       const subSteps: SolutionStep[] = [];
       let subFinalAnswer: string | undefined;
-
-      // 构建当前子问题的上下文（含前面子问题的结果）
-      const subCtx: SolverContext = {
-        ...ctx,
-        currentSubProblemIndex: sub.index,
-        completedSubResults: completedResults,
-      };
 
       for (const phase of PHASE_ORDER) {
         if (handlers.signal?.aborted) {

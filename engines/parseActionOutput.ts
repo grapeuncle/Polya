@@ -136,7 +136,7 @@ export function parseActionOutput(
   rawText: string
 ): { meta: ActionResultMeta; displayText: string } {
   const jsonBlocks = extractJsonBlocks(rawText);
-  let displayText = rawText.replace(/```json\s*[\s\S]*?```/g, '').trim();
+  const displayText = rawText.replace(/```json\s*[\s\S]*?```/g, '').trim();
 
   const meta: ActionResultMeta = {};
 

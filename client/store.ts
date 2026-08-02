@@ -13,7 +13,6 @@ import {
   SolutionBranch,
   SolutionStep,
   SubGoal,
-  SymbolicStepWarning,
 } from '../shared/types';
 import { normalizeSteps } from '../shared/normalizeStep';
 import { ACTION_TITLES, buildActionTitle, routeAction } from './actions/actionRouter';
@@ -52,6 +51,33 @@ export interface StateSnapshot {
   activeBranchId: string | null;
   selectedStepId: string | null;
   completedPhases: Phase[];
+}
+
+/** 一道题的完整会话快照（用于举一反三「完整解答」的逐层回退与缓存恢复）。 */
+export interface SessionSnapshot {
+  problem: string;
+  solution: Solution | null;
+  steps: SolutionStep[];
+  results: ActionResult[];
+  selectedStepId: string | null;
+  currentPhase: Phase;
+  completedPhases: Phase[];
+  interactedPhases: Phase[];
+  viewedPhases: Phase[];
+  branches: SolutionBranch[];
+  activeBranchId: string | null;
+  threads: Record<string, ConversationThread>;
+  subGoalsMermaid: string | null;
+  subGoals: SubGoal[];
+  showFinalAnswer: boolean;
+  restateConfirmed: boolean;
+  activeBreakdown: ActionResultMeta['breakdown'] | null;
+  currentSubProblemIndex: number | null;
+  subProblems: { index: number; label: string; text: string }[];
+  subProblemStatus: Record<number, 'pending' | 'solving' | 'done'>;
+  selectedSubProblemIndex: number | null;
+  flagged: string[];
+  expandedSubSteps: string[];
 }
 
 export type ViewMode = 'list' | 'mindmap';
@@ -103,10 +129,10 @@ interface PolyaState {
   subProblemStatus: Record<number, 'pending' | 'solving' | 'done'>;
   /** 用户当前选中查看的子问题索引（1-based），null 表示查看全部。 */
   selectedSubProblemIndex: number | null;
-  /** 后台符号校验发现的可证明矛盾（按步骤 id 分组）。 */
-  symbolicWarnings: Record<string, { expression: string; detail: string }[]>;
-  /** 后台符号校验覆盖的步骤数（null 表示尚未运行）。 */
-  symbolicCheckedSteps: number | null;
+  /** 举一反三「完整解答」导航栈：每进入一层变式题解答入栈一层，可逐层回退。 */
+  sessionStack: SessionSnapshot[];
+  /** 已解答题目的会话缓存（按题面文本键控），回退或重进时直接恢复，不再请求 AI。 */
+  sessionCache: Record<string, SessionSnapshot>;
 
   setInputProblem: (v: string) => void;
   submitProblem: (problem: string) => void;
@@ -161,11 +187,102 @@ interface PolyaState {
   onSubProblemStart: (index: number, label: string, subProblem: string) => void;
   onSubProblemComplete: (index: number, finalAnswer?: string) => void;
   setSelectedSubProblem: (index: number | null) => void;
-  onSymbolicCheck: (warnings: SymbolicStepWarning[], checkedSteps: number) => void;
+  /** 解答举一反三变式题：当前会话入栈并缓存，命中缓存则直接恢复，否则重新求解。 */
+  solveVariantProblem: (problem: string) => void;
+  /** 返回上一题：恢复栈顶会话；当前已解答会话写入缓存。 */
+  goBackSession: () => void;
 }
 
 const MAX_BRANCHES = 3;
 const MAX_SNAPSHOTS = 30;
+const MAX_SESSION_STACK = 10;
+const MAX_SESSION_CACHE = 20;
+
+/** 捕获当前会话的完整快照。 */
+function captureSession(s: PolyaState): SessionSnapshot {
+  return {
+    problem: s.problem,
+    solution: s.solution,
+    steps: s.steps,
+    results: s.results,
+    selectedStepId: s.selectedStepId,
+    currentPhase: s.currentPhase,
+    completedPhases: s.completedPhases,
+    interactedPhases: s.interactedPhases,
+    viewedPhases: s.viewedPhases,
+    branches: s.branches,
+    activeBranchId: s.activeBranchId,
+    threads: s.threads,
+    subGoalsMermaid: s.subGoalsMermaid,
+    subGoals: s.subGoals,
+    showFinalAnswer: s.showFinalAnswer,
+    restateConfirmed: s.restateConfirmed,
+    activeBreakdown: s.activeBreakdown,
+    currentSubProblemIndex: s.currentSubProblemIndex,
+    subProblems: s.subProblems,
+    subProblemStatus: s.subProblemStatus,
+    selectedSubProblemIndex: s.selectedSubProblemIndex,
+    flagged: s.flagged,
+    expandedSubSteps: s.expandedSubSteps,
+  };
+}
+
+/** 由会话快照还原出的状态字段（同时复位求解/提示类瞬态）。 */
+function restoreSessionFields(snap: SessionSnapshot): Partial<PolyaState> {
+  return {
+    problem: snap.problem,
+    solution: snap.solution,
+    steps: snap.steps,
+    results: snap.results,
+    selectedStepId: snap.selectedStepId,
+    currentPhase: snap.currentPhase,
+    completedPhases: snap.completedPhases,
+    interactedPhases: snap.interactedPhases,
+    viewedPhases: snap.viewedPhases,
+    branches: snap.branches,
+    activeBranchId: snap.activeBranchId,
+    threads: snap.threads,
+    subGoalsMermaid: snap.subGoalsMermaid,
+    subGoals: snap.subGoals,
+    showFinalAnswer: snap.showFinalAnswer,
+    restateConfirmed: snap.restateConfirmed,
+    activeBreakdown: snap.activeBreakdown,
+    currentSubProblemIndex: snap.currentSubProblemIndex,
+    subProblems: snap.subProblems,
+    subProblemStatus: snap.subProblemStatus,
+    selectedSubProblemIndex: snap.selectedSubProblemIndex,
+    flagged: snap.flagged,
+    expandedSubSteps: snap.expandedSubSteps,
+    solving: false,
+    solvingPhase: null,
+    solvingChunk: '',
+    solveError: null,
+    inputCollapsed: true,
+    snapshots: [],
+    compareSnapshotId: null,
+    difficultyRefreshPrompt: null,
+    difficultyResubmitPrompt: false,
+    pendingAskStepId: null,
+    pendingAskPrefill: '',
+    globalAskOpen: false,
+  };
+}
+
+/** 写入会话缓存（按题面键控，超出上限时淘汰最早写入项）。 */
+function cacheSession(
+  cache: Record<string, SessionSnapshot>,
+  snap: SessionSnapshot
+): Record<string, SessionSnapshot> {
+  if (!snap.problem) {
+    return cache;
+  }
+  const next = { ...cache, [snap.problem]: snap };
+  const keys = Object.keys(next);
+  if (keys.length > MAX_SESSION_CACHE) {
+    delete next[keys[0]];
+  }
+  return next;
+}
 
 function computeCompletedPhases(
   steps: SolutionStep[],
@@ -253,8 +370,8 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
   subProblems: [],
   subProblemStatus: {},
   selectedSubProblemIndex: null,
-  symbolicWarnings: {},
-  symbolicCheckedSteps: null,
+  sessionStack: [],
+  sessionCache: {},
 
   setInputProblem: (v) => set({ inputProblem: v }),
 
@@ -280,8 +397,51 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
       return;
     }
     get().pushSnapshot('求解前');
+    // 输入新题目时清空举一反三导航；重试当前题（题面相同）则保留导航栈
+    if (problem !== get().problem) {
+      set({ sessionStack: [], sessionCache: {} });
+    }
     postMessage({ type: 'solve', problem });
     get().onSolutionStart(problem);
+  },
+
+  solveVariantProblem: (problemText) => {
+    const text = problemText.trim();
+    if (!text || get().solving) {
+      return;
+    }
+    // 当前会话入栈；若已解答完成则写入缓存，供回退/重进时直接恢复
+    const cur = captureSession(get());
+    set((s) => ({
+      sessionStack: [...s.sessionStack, cur].slice(-MAX_SESSION_STACK),
+      sessionCache: cur.solution ? cacheSession(s.sessionCache, cur) : s.sessionCache,
+    }));
+    const cached = get().sessionCache[text];
+    if (cached) {
+      set(restoreSessionFields(cached));
+      postMessage({ type: 'reportState', completedPhases: cached.completedPhases });
+      get().addHistory(`打开缓存的变式题解答：${text.slice(0, 20)}`);
+      showToast('info', 'Polya：已从缓存恢复该变式题的解答，无需重新求解。');
+      return;
+    }
+    postMessage({ type: 'solve', problem: text });
+    get().onSolutionStart(text);
+  },
+
+  goBackSession: () => {
+    const s = get();
+    if (s.solving || s.sessionStack.length === 0) {
+      return;
+    }
+    const cur = captureSession(s);
+    const prev = s.sessionStack[s.sessionStack.length - 1];
+    set((st) => ({
+      sessionStack: st.sessionStack.slice(0, -1),
+      sessionCache: cur.solution ? cacheSession(st.sessionCache, cur) : st.sessionCache,
+      ...restoreSessionFields(prev),
+    }));
+    postMessage({ type: 'reportState', completedPhases: prev.completedPhases });
+    get().addHistory(`返回上一题：${prev.problem.slice(0, 20)}`);
   },
 
   onSolutionStart: (problem) =>
@@ -315,8 +475,6 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
       subProblems: [],
       subProblemStatus: {},
       selectedSubProblemIndex: null,
-      symbolicWarnings: {},
-      symbolicCheckedSteps: null,
     }),
 
   onSolutionPhaseStart: (phase) => set({ solvingPhase: phase }),
@@ -434,17 +592,6 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
     get().addHistory(`第 ${index} 小问求解完成`);
   },
 
-  onSymbolicCheck: (warnings, checkedSteps) => {
-    const grouped: Record<string, { expression: string; detail: string }[]> = {};
-    for (const w of warnings) {
-      (grouped[w.stepId] ??= []).push({ expression: w.expression, detail: w.detail });
-    }
-    set({ symbolicWarnings: grouped, symbolicCheckedSteps: checkedSteps });
-    if (warnings.length > 0) {
-      showToast('error', `Polya：符号校验发现 ${warnings.length} 处可证明的矛盾，请核对标红步骤。`);
-    }
-  },
-
   setSelectedSubProblem: (index) => {
     set({ selectedSubProblemIndex: index });
     // 滚动到该子问题的横幅位置
@@ -539,6 +686,8 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
           question: q,
           selectedText: sel,
           threadMessages: get().threads[sid]?.messages ?? [],
+          problem: get().problem,
+          steps: get().steps,
         });
         get().addHistory(`${title}（步骤 ${sid}）`);
         return requestId;
@@ -571,6 +720,8 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
       requestId,
       question,
       threadMessages: get().threads['__global__']?.messages ?? [],
+      problem: get().problem,
+      steps: get().steps,
     });
     get().addHistory(`全局提问：${question.slice(0, 16)}`);
   },

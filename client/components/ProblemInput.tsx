@@ -2,10 +2,9 @@
 import React from 'react';
 import { usePolyaStore } from '../store';
 
+// 上海卷风格中上难度三角函数大题（仿真题，非考据原题；含两小问，可演示多子问题求解）
 const SAMPLES = [
-  '求解方程 x^2 - 5x + 6 = 0',
-  '求函数 f(x) = x^2 - 4x + 3 的最小值',
-  '证明：对任意实数 a, b，有 a^2 + b^2 >= 2ab',
+  '已知函数 f(x) = 2sin x·cos x + 2√3·cos^2 x - √3（x∈R）。（1）求函数 f(x) 的最小正周期和单调递增区间；（2）当 x∈[0, π/2] 时，若方程 f(x) = t 有两个不同的实数解，求实数 t 的取值范围',
 ];
 
 export const ProblemInput: React.FC = () => {

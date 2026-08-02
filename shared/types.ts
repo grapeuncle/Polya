@@ -1,19 +1,21 @@
 // 扩展主进程与 Webview 之间共享的数据模型与类型定义。
 // 这些类型不依赖任何 VS Code 或 DOM API，因此可同时被两端引用。
 
-/** 波利亚四阶段。 */
+/** 波利亚四阶段 + 举一反三扩展阶段。 */
 export type Phase =
   | 'understanding' // 理解题目
   | 'devising' // 拟定方案
   | 'carrying-out' // 执行方案
-  | 'looking-back'; // 回顾与反思
+  | 'looking-back' // 回顾与反思
+  | 'analogy'; // 举一反三
 
-/** 四阶段的固定顺序，用于导航与进度计算。 */
+/** 阶段的固定顺序，用于导航与进度计算。 */
 export const PHASE_ORDER: Phase[] = [
   'understanding',
   'devising',
   'carrying-out',
   'looking-back',
+  'analogy',
 ];
 
 /** 阶段的中文标题与简介，供 UI 展示。 */
@@ -22,6 +24,7 @@ export const PHASE_META: Record<Phase, { title: string; subtitle: string; emoji:
   devising: { title: '拟定方案', subtitle: '寻找已知与未知之间的联系', emoji: '🧭' },
   'carrying-out': { title: '执行方案', subtitle: '逐步实施并检查每一步', emoji: '✍️' },
   'looking-back': { title: '回顾反思', subtitle: '检验结果并总结推广', emoji: '🔭' },
+  analogy: { title: '举一反三', subtitle: '同类变式训练，提升泛化能力', emoji: '🌱' },
 };
 
 /** 定理前提检查项。 */
@@ -40,12 +43,20 @@ export interface StepMetadata {
   heuristic?: string;
   /** 应用的定理 / 公式。 */
   theoremApplied?: string;
-  /** 常见错误提示。 */
+  /** 常见错误提示（主要用于执行方案阶段）。 */
   commonMistake?: string;
+  /** 易错提醒严重级别：critical 高危（默认展开并高亮）、warning 需注意、reminder 一般提醒。仅 commonMistake 存在时配套。 */
+  mistakeSeverity?: 'critical' | 'warning' | 'reminder';
+  /** 审题陷阱（理解题目阶段专用：学生尚未动手解题，语义是"审题"而非"做错"），覆盖三型：看漏（丢失条件信息）、误读（曲解题意）、想当然（脑补题目未给的前提）。 */
+  overlooked?: string;
+  /** 审题陷阱严重级别，含义同 mistakeSeverity。仅 overlooked 存在时配套。 */
+  overlookedSeverity?: 'critical' | 'warning' | 'reminder';
   /** 替代解法简述。 */
   alternativeApproach?: string;
   /** 定理前提检查（AI 补全）。 */
   theoremCheck?: TheoremCheckItem[];
+  /** 举一反三阶段专用：变式题提示（简洁点出相对原题的差异与解题技巧），默认折叠，学生点击后展开。 */
+  analogyHint?: string;
 }
 
 /** 题干拆解句。 */
@@ -196,13 +207,6 @@ export interface ConversationMessage {
   time: number;
 }
 
-/** 后台符号校验发现的单条可证明矛盾。 */
-export interface SymbolicStepWarning {
-  stepId: string;
-  expression: string;
-  detail: string;
-}
-
 /** 多轮对话线程。 */
 export interface ConversationThread {
   stepId: string;
@@ -296,8 +300,19 @@ export type WebviewToExtMessage =
       question?: string;
       selectedText?: string;
       threadMessages?: ConversationMessage[];
+      /** 客户端当前会话的题目与步骤（用于恢复到缓存会话后纠正服务端上下文）。 */
+      problem?: string;
+      steps?: SolutionStep[];
     }
-  | { type: 'globalAsk'; requestId: string; question: string; threadMessages?: ConversationMessage[] }
+  | {
+      type: 'globalAsk';
+      requestId: string;
+      question: string;
+      threadMessages?: ConversationMessage[];
+      /** 同 action：客户端当前会话上下文。 */
+      problem?: string;
+      steps?: SolutionStep[];
+    }
   | { type: 'setDifficulty'; difficulty: Difficulty }
   | { type: 'copy'; text: string }
   | { type: 'cancelAction'; requestId: string }
@@ -318,8 +333,6 @@ export type ExtToWebviewMessage =
   | { type: 'solutionHeartbeat'; phase: Phase; elapsedMs: number }
   | { type: 'solution'; solution: Solution }
   | { type: 'solveError'; message: string }
-  // 后台静默符号校验结果：仅携带可证明的矛盾；空数组表示全部通过。
-  | { type: 'symbolicCheck'; warnings: SymbolicStepWarning[]; checkedSteps: number }
   | { type: 'subProblemStart'; index: number; label: string; subProblem: string }
   | { type: 'subProblemPhaseSteps'; index: number; phase: Phase; steps: SolutionStep[] }
   | { type: 'subProblemComplete'; index: number; finalAnswer?: string }

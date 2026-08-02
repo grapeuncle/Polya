@@ -50,21 +50,22 @@ function buildSteps(problem: string, template: ReturnType<typeof pickTemplate>):
         phase: 'understanding',
         content: `理解题目：${shortProblem}。需明确要证明的命题及其前提条件。`,
         metadata: {
-          objective: '弄清证明目标与可用条件。',
-          commonMistake: '未写清「设」就直接推导，逻辑不严谨。',
+          heuristic: '证明题先明确命题结构与可用条件。',
+          overlooked: '误读：命题中的量词（"任意"还是"存在"）与否定词极易看反，证错方向满盘皆输。',
+          overlookedSeverity: 'warning',
         },
       },
       {
         id: 's2',
         phase: 'devising',
         content: '拟定方案：考虑从左式化到右式，或构造辅助量/不等式链。',
-        metadata: { objective: '选择证明策略。', heuristic: '常见方法：直接推导、反证、归纳。' },
+        metadata: { heuristic: '常见方法：直接推导、反证、归纳。' },
       },
       {
         id: 's3',
         phase: 'carrying-out',
         content: '执行证明：逐步变形，每一步注明依据（公式/定理）。',
-        metadata: { theoremApplied: '基本代数恒等式' },
+        metadata: { objective: '完成恒等变形。', theoremApplied: '基本代数恒等式' },
         subSteps: [
           { id: 's3a', phase: 'carrying-out', content: '写出起始表达式。', metadata: {} },
           { id: 's3b', phase: 'carrying-out', content: '应用恒等变形得到目标式。', metadata: {} },
@@ -74,7 +75,7 @@ function buildSteps(problem: string, template: ReturnType<typeof pickTemplate>):
         id: 's4',
         phase: 'looking-back',
         content: '回顾：检查是否用到全部条件，能否推广到更一般情形。',
-        metadata: { objective: '确认证明完整。' },
+        metadata: { heuristic: '检验每个条件是否被使用，是验证证明完整性的常用切口。' },
       },
     ];
   }
@@ -84,7 +85,11 @@ function buildSteps(problem: string, template: ReturnType<typeof pickTemplate>):
         id: 's1',
         phase: 'understanding',
         content: `理解题目：${shortProblem}。明确变量范围与求最值的函数。`,
-        metadata: { objective: '确定优化目标与约束。' },
+        metadata: {
+          heuristic: '求最值问题先锁定变量范围与目标函数。',
+          overlooked: '看漏：变量取值范围（定义域）与区间端点开闭，直接决定最值能否取到。',
+          overlookedSeverity: 'warning',
+        },
       },
       {
         id: 's2',
@@ -96,7 +101,7 @@ function buildSteps(problem: string, template: ReturnType<typeof pickTemplate>):
         id: 's3',
         phase: 'carrying-out',
         content: '执行：对函数配方或求导，找到极值点并验证。',
-        metadata: { theoremApplied: '顶点公式 / 导数为零' },
+        metadata: { objective: '求出极值点并验证。', theoremApplied: '顶点公式 / 导数为零' },
         subSteps: [
           { id: 's3a', phase: 'carrying-out', content: '配方或求导。', metadata: {} },
           { id: 's3b', phase: 'carrying-out', content: '代入极值点求最值。', metadata: {} },
@@ -106,7 +111,7 @@ function buildSteps(problem: string, template: ReturnType<typeof pickTemplate>):
         id: 's4',
         phase: 'looking-back',
         content: '回顾：检查端点与定义域，确认最值正确。',
-        metadata: { objective: '验证最值。' },
+        metadata: { heuristic: '端点与定义域是最值问题最易漏检的地方。' },
       },
     ];
   }
@@ -116,9 +121,9 @@ function buildSteps(problem: string, template: ReturnType<typeof pickTemplate>):
       phase: 'understanding',
       content: `阅读题目：${shortProblem}。识别未知量与方程类型。`,
       metadata: {
-        objective: '明确求解目标。',
         heuristic: '标准形式 $ax^2+bx+c=0$。',
-        commonMistake: '忽略方程可能有多个根。',
+        overlooked: '想当然：不要默认方程必有两个实根；留意题干是否含"两个不同实根"等限定词。',
+        overlookedSeverity: 'warning',
       },
     },
     {
@@ -126,7 +131,6 @@ function buildSteps(problem: string, template: ReturnType<typeof pickTemplate>):
       phase: 'devising',
       content: '拟定方案：尝试因式分解或求根公式。',
       metadata: {
-        objective: '选择求解路径。',
         theoremApplied: '因式分解 / 求根公式',
         alternativeApproach: '配方法',
       },
@@ -139,6 +143,7 @@ function buildSteps(problem: string, template: ReturnType<typeof pickTemplate>):
         objective: '求出根。',
         theoremApplied: '零积性质',
         commonMistake: '漏解或符号错误。',
+        mistakeSeverity: 'critical',
       },
       subSteps: [
         { id: 's3a', phase: 'carrying-out', content: '因式分解或套公式。', metadata: {} },
@@ -149,7 +154,41 @@ function buildSteps(problem: string, template: ReturnType<typeof pickTemplate>):
       id: 's4',
       phase: 'looking-back',
       content: '回顾：代回验证，并可用韦达定理交叉检验。',
-      metadata: { objective: '确认答案正确。' },
+      metadata: { heuristic: '韦达定理是检验二次方程根的快捷工具。' },
+    },
+  ];
+}
+
+/** 举一反三阶段的 Mock 变式题（3 道，含提示）。 */
+function buildAnalogySteps(problem: string): SolutionStep[] {
+  const short = problem.slice(0, 50);
+  return [
+    {
+      id: 'analogy-1',
+      phase: 'analogy',
+      content: `变式一：${short}（将原题中的数值替换后重新求解，Mock 占位题面）`,
+      metadata: {
+        analogyHint:
+          '与原题结构完全相同，仅数值变化；套用同一方法即可。\n具体提示：按原题步骤逐步代入新数值，注意符号与运算顺序，最后代回验证。',
+      },
+    },
+    {
+      id: 'analogy-2',
+      phase: 'analogy',
+      content: `变式二：${short}（将原题的条件与所求互换，逆向设问，Mock 占位题面）`,
+      metadata: {
+        analogyHint:
+          '逆向设问：已知结论反推条件，技巧是先按原方向列出关系式。\n关键步骤：① 写出原题的正向关系式；② 把结论当作已知、条件当作未知；③ 解关于未知条件的方程并检验合理性。',
+      },
+    },
+    {
+      id: 'analogy-3',
+      phase: 'analogy',
+      content: `变式三：${short}（将原题情境推广到更一般的参数情形，Mock 占位题面）`,
+      metadata: {
+        analogyHint:
+          '参数化推广：用参数替代具体常数，按原方法推导。\n关键步骤：① 用参数重写条件；② 按原方法推出含参结果；③ 讨论参数取值对结果（如根的个数、最值）的影响。',
+      },
     },
   ];
 }
@@ -187,7 +226,7 @@ export class MockSolverEngine implements ISolverEngine {
     handlers: SolutionStreamHandlers
   ): Promise<Solution> {
     const template = pickTemplate(problem);
-    const steps = buildSteps(problem, template);
+    const steps = [...buildSteps(problem, template), ...buildAnalogySteps(problem)];
     const byPhase = PHASE_ORDER.map((p) => ({
       phase: p,
       steps: steps.filter((s) => s.phase === p),
@@ -244,12 +283,19 @@ export class MockSolverEngine implements ISolverEngine {
         const phaseStep: SolutionStep = {
           id: stepId,
           phase,
-          content: `[Mock] 第 ${sub.index} 小问 — ${phase === 'understanding' ? '理解题目' : phase === 'devising' ? '拟定方案' : phase === 'carrying-out' ? '执行方案' : '回顾反思'}：${sub.text.slice(0, 60)}...`,
+          content: `[Mock] 第 ${sub.index} 小问 — ${phase === 'understanding' ? '理解题目' : phase === 'devising' ? '拟定方案' : phase === 'carrying-out' ? '执行方案' : phase === 'looking-back' ? '回顾反思' : '举一反三'}：${sub.text.slice(0, 60)}...`,
           metadata: {
             objective: `处理第 ${sub.index} 小问的 ${phase} 阶段。`,
           },
           subProblemIndex: sub.index,
         };
+
+        if (phase === 'analogy') {
+          phaseStep.metadata = {
+            analogyHint:
+              '[Mock] 该变式相对本小问改变了条件形式；技巧：先化为原题的标准结构再求解。\n关键步骤：① 对照原题找出被改动的条件；② 化为标准结构；③ 套用原方法求解。',
+          };
+        }
 
         if (phase === 'carrying-out') {
           phaseStep.subSteps = [

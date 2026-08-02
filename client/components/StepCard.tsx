@@ -41,11 +41,13 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
 
   const flagged = usePolyaStore((s) => s.flagged.includes(step.id));
 
-  const teacherMode = usePolyaStore((s) => s.teacherMode);
-
   const expanded = usePolyaStore((s) => s.expandedSubSteps.includes(step.id));
 
   const toggleSubSteps = usePolyaStore((s) => s.toggleSubSteps);
+
+  const solveVariantProblem = usePolyaStore((s) => s.solveVariantProblem);
+
+  const solving = usePolyaStore((s) => s.solving);
 
   const results = usePolyaStore(
     useShallow((s) => s.results.filter((r) => r.stepId === step.id))
@@ -53,13 +55,13 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
 
   const hasWarning = usePolyaStore((s) => s.getStepWarning(step.id));
 
-  const symbolicWarnings = usePolyaStore((s) => s.symbolicWarnings[step.id]);
-
-  const hasSymbolicWarning = (symbolicWarnings?.length ?? 0) > 0;
-
-
-
   const meta = step.metadata;
+
+  const isAnalogy = step.phase === 'analogy';
+
+  const mistakeSeverity = meta.mistakeSeverity ?? 'warning';
+
+  const overlookedSeverity = meta.overlookedSeverity ?? 'warning';
 
   const phaseMeta = PHASE_META[step.phase];
 
@@ -143,7 +145,7 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
 
       ref={cardRef}
 
-      className={`step-card ${selected ? 'selected' : ''} ${flagged ? 'flagged' : ''} ${hasWarning || hasSymbolicWarning ? 'step-warning' : ''}`}
+      className={`step-card ${selected ? 'selected' : ''} ${flagged ? 'flagged' : ''} ${hasWarning ? 'step-warning' : ''}`}
 
       onMouseUp={(e) => {
 
@@ -158,6 +160,24 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
       onClick={(e) => {
 
         e.stopPropagation();
+
+        // 点击交互元素（折叠 summary、按钮、链接、浮动菜单等）时不切换浮动菜单
+
+        const target = e.target as Element;
+
+        if (
+
+          target.closest(
+
+            'summary, button, a, input, textarea, select, .floating-menu, .selection-toolbar, .result-list'
+
+          )
+
+        ) {
+
+          return;
+
+        }
 
         const card = cardRef.current;
 
@@ -193,12 +213,6 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
 
         {flagged && <span className="flag-badge codicon codicon-bookmark" title="疑难步骤" />}
 
-        {hasSymbolicWarning && (
-
-          <span className="symbolic-warn-badge codicon codicon-error" title="后台符号校验发现矛盾" />
-
-        )}
-
       </div>
 
 
@@ -209,41 +223,7 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
 
       </div>
 
-
-
-      {hasSymbolicWarning && (
-
-        <div className="symbolic-warn" onClick={(e) => e.stopPropagation()}>
-
-          <div className="symbolic-warn-title">
-
-            <span className="codicon codicon-error" /> 符号校验发现 {symbolicWarnings.length} 处可证明的矛盾
-
-          </div>
-
-          <ul>
-
-            {symbolicWarnings.map((w, i) => (
-
-              <li key={i}>
-
-                <code>{w.expression}</code> —— {w.detail}
-
-              </li>
-
-            ))}
-
-          </ul>
-
-          <div className="symbolic-warn-tip">这是 mathjs 客观校验结果（与 AI 无关），请点击「检验这一步」复核。</div>
-
-        </div>
-
-      )}
-
-
-
-      {(meta.objective || meta.heuristic || meta.theoremApplied) && (
+      {(meta.objective || meta.heuristic || meta.theoremApplied || meta.commonMistake || meta.overlooked) && (
 
         <div className="step-meta">
 
@@ -259,23 +239,11 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
 
           )}
 
-          {meta.heuristic && (
-
-            <details className="meta-row" open={!teacherMode}>
-
-              <summary className="meta-label">启发 {teacherMode ? '（点击展开）' : ''}</summary>
-
-              <MarkdownView content={meta.heuristic} />
-
-            </details>
-
-          )}
-
           {meta.theoremApplied && (
 
-            <div className="meta-row">
+            <div className="meta-row theorem">
 
-              <span className="meta-label">定理</span>
+              <span className="meta-label chip">定理</span>
 
               <MarkdownView content={meta.theoremApplied} />
 
@@ -283,15 +251,59 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
 
           )}
 
+          {meta.heuristic && (
+
+            <details className="meta-row">
+
+              <summary className="meta-label">启发</summary>
+
+              <MarkdownView content={meta.heuristic} />
+
+            </details>
+
+          )}
+
           {meta.commonMistake && (
 
-            <div className="meta-row warn">
+            <details
 
-              <span className="meta-label">易错</span>
+              className={`meta-row mistake ${mistakeSeverity}`}
+
+              open={mistakeSeverity === 'critical'}
+
+            >
+
+              <summary className="meta-label">
+
+                易错{mistakeSeverity === 'critical' ? '·高危' : ''}
+
+              </summary>
 
               <MarkdownView content={meta.commonMistake} />
 
-            </div>
+            </details>
+
+          )}
+
+          {meta.overlooked && (
+
+            <details
+
+              className={`meta-row mistake ${overlookedSeverity}`}
+
+              open={overlookedSeverity === 'critical'}
+
+            >
+
+              <summary className="meta-label">
+
+                易忽略{overlookedSeverity === 'critical' ? '·高危' : ''}
+
+              </summary>
+
+              <MarkdownView content={meta.overlooked} />
+
+            </details>
 
           )}
 
@@ -350,6 +362,56 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
             </div>
 
           )}
+
+        </div>
+
+      )}
+
+
+
+      {isAnalogy && (
+
+        <div className="analogy-extra">
+
+          {meta.analogyHint && (
+
+            <details className="meta-row analogy-hint">
+
+              <summary className="meta-label">提示（差异与技巧）</summary>
+
+              <MarkdownView content={meta.analogyHint} />
+
+            </details>
+
+          )}
+
+          <button
+
+            type="button"
+
+            className="primary analogy-solve-btn"
+
+            disabled={solving}
+
+            title="按完整解题流程（含举一反三）解答此变式题；当前题目会入栈，可随时返回"
+
+            onMouseDown={(e) => e.stopPropagation()}
+
+            onMouseUp={(e) => e.stopPropagation()}
+
+            onClick={(e) => {
+
+              e.stopPropagation();
+
+              solveVariantProblem(step.content);
+
+            }}
+
+          >
+
+            <span className="codicon codicon-play" /> 完整解答
+
+          </button>
 
         </div>
 

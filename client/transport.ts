@@ -120,7 +120,7 @@ async function consumeSse(res: Response): Promise<void> {
   let buffer = '';
   let currentEvent = 'message';
 
-  while (true) {
+  for (;;) {
     const { done, value } = await reader.read();
     if (done) {
       break;

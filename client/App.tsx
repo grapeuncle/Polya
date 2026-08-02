@@ -37,7 +37,6 @@ export const App: React.FC = () => {
   const onActionError = usePolyaStore((s) => s.onActionError);
   const onActionCancelled = usePolyaStore((s) => s.onActionCancelled);
   const confirmDifficultyRefresh = usePolyaStore((s) => s.confirmDifficultyRefresh);
-  const onSymbolicCheck = usePolyaStore((s) => s.onSymbolicCheck);
   const setViewMode = usePolyaStore((s) => s.setViewMode);
   const setShowFinalAnswer = usePolyaStore((s) => s.setShowFinalAnswer);
   const submitProblem = usePolyaStore((s) => s.submitProblem);
@@ -65,9 +64,6 @@ export const App: React.FC = () => {
           break;
         case 'solution':
           onSolution(msg.solution);
-          break;
-        case 'symbolicCheck':
-          onSymbolicCheck(msg.warnings, msg.checkedSteps);
           break;
         case 'branchStepsAppended':
           onBranchStepsAppended(msg.branchId, msg.steps);
@@ -142,16 +138,16 @@ export const App: React.FC = () => {
   const difficultyResubmitPrompt = usePolyaStore((s) => s.difficultyResubmitPrompt);
   const solvingPhase = usePolyaStore((s) => s.solvingPhase);
   const solvingChunk = usePolyaStore((s) => s.solvingChunk);
-  const currentSubProblemIndex = usePolyaStore((s) => s.currentSubProblemIndex);
   const subProblems = usePolyaStore((s) => s.subProblems);
   const subProblemStatus = usePolyaStore((s) => s.subProblemStatus);
-  const selectedSubProblemIndex = usePolyaStore((s) => s.selectedSubProblemIndex);
   const activeBreakdown = usePolyaStore((s) => s.activeBreakdown);
   const restateConfirmed = usePolyaStore((s) => s.restateConfirmed);
   const steps = usePolyaStore((s) => s.steps);
   const branches = usePolyaStore((s) => s.branches);
   const activeBranchId = usePolyaStore((s) => s.activeBranchId);
   const results = usePolyaStore((s) => s.results);
+  const sessionStack = usePolyaStore((s) => s.sessionStack);
+  const goBackSession = usePolyaStore((s) => s.goBackSession);
 
   const displaySteps = React.useMemo(() => {
     if (!activeBranchId) {
@@ -270,6 +266,29 @@ export const App: React.FC = () => {
         </div>
 
         <main className="main-col">
+          {sessionStack.length > 0 && (
+            <div className="session-nav">
+              <button
+                className="link-btn session-back-btn"
+                onClick={() => goBackSession()}
+                disabled={solving}
+                title="返回上一题（内容已缓存，无需重新求解）"
+              >
+                <span className="codicon codicon-arrow-left" /> 返回上一题
+                {sessionStack.length > 1 && (
+                  <span className="session-depth">（共 {sessionStack.length} 层）</span>
+                )}
+              </button>
+              <span
+                className="session-nav-preview"
+                title={sessionStack[sessionStack.length - 1].problem}
+              >
+                上一级：{sessionStack[sessionStack.length - 1].problem.slice(0, 40)}
+                {sessionStack[sessionStack.length - 1].problem.length > 40 ? '…' : ''}
+              </span>
+            </div>
+          )}
+
           {problem && (
             <div className="problem-banner">
               题目：

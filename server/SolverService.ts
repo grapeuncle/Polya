@@ -2,16 +2,9 @@
 import { ISolverEngine, StreamHandlers } from '../engines/ISolverEngine';
 import { createEngine } from '../engines/factory';
 import {
-  formatSymbolicVerification,
-  SymbolicVerification,
-  verifyEquations,
-} from '../engines/symbolicVerifier';
-import {
-  ActionResultMeta,
   ConversationMessage,
   Difficulty,
   ExtToWebviewMessage,
-  MenuActionId,
   Phase,
   SolutionBranch,
   SolutionStep,
@@ -19,9 +12,6 @@ import {
   WebviewToExtMessage,
 } from '../shared/types';
 import { AppConfig } from '../shared/appConfig';
-
-/** 需要符号引擎客观兜底的「验证类」动作。 */
-const SYMBOLIC_VERIFY_ACTIONS = new Set<MenuActionId>(['verify', 'checkCalculation', 'verifyAnswer']);
 
 export interface SessionPrefs {
   difficulty: Difficulty;
@@ -84,7 +74,7 @@ export class SolverService {
         await this.runAction(msg);
         break;
       case 'globalAsk':
-        await this.runGlobalAsk(msg.requestId, msg.question, msg.threadMessages);
+        await this.runGlobalAsk(msg.requestId, msg.question, msg.threadMessages, msg.problem, msg.steps);
         break;
       case 'setDifficulty':
         this.prefs.difficulty = msg.difficulty;
@@ -152,39 +142,11 @@ export class SolverService {
         },
       });
       this.steps = solution.steps;
-      this.runBackgroundSymbolicCheck();
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       this.emit({ type: 'solveError', message });
     } finally {
       clearInterval(heartbeatTimer);
-    }
-  }
-
-  /**
-   * 后台静默符号校验：解题完成后自动全量运行。
-   * 只有「可证明的矛盾」才推送上卡；verified / conditional 属于正常情况，不打扰学生。
-   */
-  private runBackgroundSymbolicCheck(): void {
-    try {
-      const warnings: { stepId: string; expression: string; detail: string }[] = [];
-      const walk = (steps: SolutionStep[]): void => {
-        for (const s of steps) {
-          const v = verifyEquations(s.content);
-          for (const c of v.checks) {
-            if (c.verdict === 'contradiction') {
-              warnings.push({ stepId: s.id, expression: c.expression, detail: c.detail });
-            }
-          }
-          if (s.subSteps?.length) {
-            walk(s.subSteps);
-          }
-        }
-      };
-      walk(this.steps);
-      this.emit({ type: 'symbolicCheck', warnings, checkedSteps: this.steps.length });
-    } catch {
-      // 后台校验失败静默降级，不影响主流程
     }
   }
 
@@ -205,47 +167,12 @@ export class SolverService {
       if (!this.engine) {
         this.engine = await createEngine(this.appConfig);
       }
-      const ctx = this.buildContext(stepId, undefined, selectedText);
-      // 符号引擎客观校验（P0）：先于 AI 输出确定性结论，矛盾时强制 warning。
-      let symbolic: SymbolicVerification | null = null;
-      if (SYMBOLIC_VERIFY_ACTIONS.has(action) && ctx.focusedStep) {
-        try {
-          symbolic = verifyEquations(ctx.focusedStep.content);
-        } catch {
-          symbolic = null;
-        }
-        const section = symbolic ? formatSymbolicVerification(symbolic) : '';
-        if (section) {
-          this.emit({ type: 'actionChunk', requestId, chunk: `${section}\n\n---\n\n` });
-        }
-      }
-      let meta: ActionResultMeta | undefined;
-      const wrapped: StreamHandlers = {
-        ...handlers,
-        onMeta: (m) => {
-          meta = m;
-        },
-      };
+      const ctx = this.buildContext(stepId, undefined, selectedText, msg.problem, msg.steps);
       if (action === 'verify') {
-        await this.engine.checkStep(stepId, ctx, wrapped);
+        await this.engine.checkStep(stepId, ctx, handlers);
       } else {
-        await this.engine.explainStep(action, stepId, ctx, wrapped, question, selectedText);
+        await this.engine.explainStep(action, stepId, ctx, handlers, question, selectedText);
       }
-      if (symbolic && symbolic.contradictionCount > 0) {
-        const symbolicHighlights = symbolic.checks
-          .filter((c) => c.verdict === 'contradiction')
-          .map((c) => ({
-            target: 'step' as const,
-            message: `符号引擎：${c.expression} —— ${c.detail}`,
-          }));
-        meta = {
-          ...(meta ?? {}),
-          kind: 'warning',
-          title: meta?.title ?? '符号校验发现矛盾',
-          highlights: [...(meta?.highlights ?? []), ...symbolicHighlights],
-        };
-      }
-      this.emit({ type: 'actionEnd', requestId, meta });
     } catch (e: unknown) {
       if (
         (e instanceof Error && e.name === 'AbortError') ||
@@ -293,7 +220,9 @@ export class SolverService {
   private async runGlobalAsk(
     requestId: string,
     question: string,
-    threadMessages?: ConversationMessage[]
+    threadMessages?: ConversationMessage[],
+    problem?: string,
+    steps?: SolutionStep[]
   ): Promise<void> {
     if (threadMessages) {
       this.threadSnapshots.set('__global__', threadMessages);
@@ -305,7 +234,7 @@ export class SolverService {
       if (!this.engine) {
         this.engine = await createEngine(this.appConfig);
       }
-      const ctx = this.buildContext();
+      const ctx = this.buildContext(undefined, undefined, undefined, problem, steps);
       let meta;
       await this.engine.globalAsk(question, ctx, {
         onChunk: (chunk) => this.emit({ type: 'actionChunk', requestId, chunk }),
@@ -375,10 +304,15 @@ export class SolverService {
   private buildContext(
     focusedStepId?: string,
     activeBranch?: SolutionBranch,
-    focusedSelection?: string
+    focusedSelection?: string,
+    problemOverride?: string,
+    stepsOverride?: SolutionStep[]
   ): SolverContext {
+    // 客户端恢复缓存会话后，服务端持有的题目/步骤可能已过时，优先使用消息携带的上下文
+    const steps = stepsOverride ?? this.steps;
+    const problem = problemOverride ?? this.problem;
     const focusedStep = focusedStepId
-      ? findStepInTree(this.steps, focusedStepId)
+      ? findStepInTree(steps, focusedStepId)
       : undefined;
     const currentPhase = focusedStep?.phase ?? 'understanding';
     const threads: SolverContext['conversationThreads'] = {};
@@ -386,10 +320,10 @@ export class SolverService {
       threads[key] = { stepId: key, messages };
     }
     return {
-      problem: this.problem,
+      problem,
       difficulty: this.prefs.difficulty,
       phaseState: { currentPhase, completedPhases: this.completedPhases },
-      steps: this.steps,
+      steps,
       focusedStep,
       teacherMode: this.prefs.teacherMode,
       conversationThreads: threads,

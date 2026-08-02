@@ -573,8 +573,22 @@ input[type='range'] {
   margin-bottom: 4px;
   align-items: baseline;
 }
-.meta-row.warn .meta-label {
+.meta-row.mistake.warning .meta-label {
   background: var(--vscode-inputValidation-warningBackground, rgba(255, 200, 0, 0.2));
+}
+.meta-row.mistake.critical .meta-label {
+  background: var(--vscode-inputValidation-errorBackground, rgba(255, 80, 80, 0.25));
+  color: var(--vscode-errorForeground, #f48771);
+  border-color: currentColor;
+  font-weight: 600;
+}
+.meta-row.mistake.reminder .meta-label {
+  opacity: 0.8;
+}
+.meta-label.chip {
+  background: transparent;
+  font-size: 11px;
+  opacity: 0.85;
 }
 .meta-label {
   flex-shrink: 0;
@@ -591,6 +605,60 @@ details.meta-row {
 details.meta-row summary {
   display: inline-block;
   list-style: none;
+}
+
+/* 变式题会话导航 */
+.session-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.session-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 13px;
+}
+.session-back-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.session-depth {
+  color: var(--muted);
+  font-size: 12px;
+}
+.session-nav-preview {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 举一反三 */
+.analogy-extra {
+  margin-top: 10px;
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.analogy-hint {
+  width: 100%;
+  font-size: 12px;
+}
+.analogy-solve-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* 子步骤 */
@@ -682,43 +750,6 @@ details.meta-row summary {
 }
 .menu-experimental[open] > summary {
   margin-bottom: 8px;
-}
-/* 后台符号校验警示 */
-.symbolic-warn-badge {
-  color: var(--vscode-errorForeground, #f14c4c);
-  margin-left: auto;
-}
-.symbolic-warn {
-  margin-top: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--vscode-errorForeground, #f14c4c);
-  border-radius: 6px;
-  background: rgba(241, 76, 76, 0.08);
-  font-size: 12px;
-}
-.symbolic-warn-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  color: var(--vscode-errorForeground, #f14c4c);
-  margin-bottom: 6px;
-}
-.symbolic-warn ul {
-  margin: 0 0 6px;
-  padding-left: 18px;
-}
-.symbolic-warn li {
-  margin-bottom: 2px;
-}
-.symbolic-warn code {
-  background: rgba(127, 127, 127, 0.15);
-  padding: 1px 4px;
-  border-radius: 3px;
-}
-.symbolic-warn-tip {
-  color: var(--muted);
-  font-size: 11px;
 }
 .menu-btn.active {
   background: var(--vscode-charts-orange, #e08a00);

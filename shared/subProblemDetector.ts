@@ -24,15 +24,18 @@ export function detectSubProblems(problem: string): DetectedSubProblem[] {
 
   while ((m = cnParen.exec(problem)) !== null) {
     const num = parseInt(m[1], 10);
+    const pos = m.index;
     // 去重：同一位置只保留一个
-    if (!markers.some((mk) => mk.pos === m.index)) {
-      markers.push({ index: num, pos: m.index, label: `（${num}）` });
+    if (!markers.some((mk) => mk.pos === pos)) {
+      markers.push({ index: num, pos, label: `（${num}）` });
     }
   }
 
   while ((m = enParen.exec(problem)) !== null) {
-    if (!markers.some((mk) => mk.pos === m.index)) {
-      markers.push({ index: parseInt(m[1], 10), pos: m.index, label: `(${m[1]})` });
+    const num = parseInt(m[1], 10);
+    const pos = m.index;
+    if (!markers.some((mk) => mk.pos === pos)) {
+      markers.push({ index: num, pos, label: `(${num})` });
     }
   }
 

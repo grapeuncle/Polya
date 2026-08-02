@@ -23,7 +23,7 @@ export const COMMON_ACTIONS: MenuItemConfig[] = [
   { id: 'why', label: '为什么这样做', icon: 'question', tip: '回溯推理依据' },
   { id: 'detail', label: '查看详细推导', icon: 'list-tree', tip: '展开逐步推导' },
   { id: 'alternatives', label: '还有其他方法吗', icon: 'git-branch', tip: '给出替代处理并对比' },
-  { id: 'verify', label: '检验这一步', icon: 'check', tip: '客观校验已在后台自动完成；点此让 AI 进一步讲解这一步为何正确/有误', core: true },
+  { id: 'verify', label: '检验这一步', icon: 'check', tip: '让 AI 检验这一步的推理与计算', core: true },
   { id: 'commonMistake', label: '常见错误', icon: 'warning', tip: '如果做错了会怎样' },
   { id: 'ask', label: '提问 / 追问', icon: 'mention', tip: '就此步骤提问', needsInput: true, core: true },
   { id: 'copy', label: '复制', icon: 'copy', tip: '复制内容到剪贴板', frontendOnly: true },
@@ -60,4 +60,6 @@ export const PHASE_ACTIONS: Record<Phase, MenuItemConfig[]> = {
     { id: 'takeaway', label: '这道题教会我们', icon: 'mortar-board', tip: '总结关键思想' },
     { id: 'generatePractice', label: '生成同类练习', icon: 'add', tip: '生成新练习题' },
   ],
+  // 举一反三：变式题卡片以「提示折叠 + 完整解答」为主交互，无阶段专属动作
+  analogy: [],
 };

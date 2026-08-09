@@ -27,6 +27,9 @@ export class SolverService {
   private threadSnapshots = new Map<string, ConversationMessage[]>();
   private prefs: SessionPrefs = { difficulty: 'standard', teacherMode: false };
 
+  /** solve 操作的专用 AbortController 键名。 */
+  private static readonly SOLVE_KEY = '__solve__';
+
   onEvent: (msg: ExtToWebviewMessage) => void = () => {};
 
   constructor(private readonly appConfig: AppConfig) {}
@@ -89,6 +92,14 @@ export class SolverService {
         }
         break;
       }
+      case 'cancelSolve': {
+        const ctrl = this.inflight.get(SolverService.SOLVE_KEY);
+        if (ctrl) {
+          ctrl.abort();
+          this.inflight.delete(SolverService.SOLVE_KEY);
+        }
+        break;
+      }
       case 'reportState':
         this.completedPhases = msg.completedPhases;
         break;
@@ -110,6 +121,8 @@ export class SolverService {
     this.steps = [];
     let currentPhase: Phase = 'understanding';
     const startedAt = Date.now();
+    const controller = new AbortController();
+    this.inflight.set(SolverService.SOLVE_KEY, controller);
     const heartbeatTimer = setInterval(() => {
       this.emit({ type: 'solutionHeartbeat', phase: currentPhase, elapsedMs: Date.now() - startedAt });
     }, 30000);
@@ -119,6 +132,7 @@ export class SolverService {
       }
       const ctx = this.buildContext();
       const solution = await this.engine.generateSolutionStreaming(problem, ctx, {
+        signal: controller.signal,
         onSubProblemStart: (index, label, subProblem) => {
           this.emit({ type: 'subProblemStart', index, label, subProblem });
         },
@@ -143,10 +157,18 @@ export class SolverService {
       });
       this.steps = solution.steps;
     } catch (e: unknown) {
+      if (
+        (e instanceof Error && e.name === 'AbortError') ||
+        controller.signal.aborted
+      ) {
+        // 用户主动中断求解，不报错
+        return;
+      }
       const message = e instanceof Error ? e.message : String(e);
       this.emit({ type: 'solveError', message });
     } finally {
       clearInterval(heartbeatTimer);
+      this.inflight.delete(SolverService.SOLVE_KEY);
     }
   }
 

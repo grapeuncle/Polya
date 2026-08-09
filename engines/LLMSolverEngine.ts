@@ -355,6 +355,12 @@ export class LLMSolverEngine implements ISolverEngine {
   /** OpenAI Chat Completions 流式（SSE）。 */
   private async streamOpenAI(system: string, user: string, handlers: StreamHandlers): Promise<void> {
     const url = `${this.config.baseUrl.replace(/\/$/, '')}/chat/completions`;
+    // 组合用户取消信号与 180s 超时信号，防止底层网络库无限期挂起
+    const timeoutMs = 180_000;
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const signal = handlers.signal
+      ? AbortSignal.any([handlers.signal, timeoutSignal])
+      : timeoutSignal;
     const res = await fetch(url, {
       method: 'POST',
       headers: {
@@ -369,9 +375,17 @@ export class LLMSolverEngine implements ISolverEngine {
           { role: 'user', content: user },
         ],
       }),
-      signal: handlers.signal,
+      signal,
     });
-    await this.consumeSSE(res, handlers, (json) => json?.choices?.[0]?.delta?.content);
+    if (!res.ok || !res.body) {
+      const errText = await res.text().catch(() => res.statusText);
+      throw new Error(`AI 请求失败（${res.status}）：${errText}`);
+    }
+    await this.consumeSSE(res, handlers, (json) => {
+      const delta = json?.choices?.[0]?.delta;
+      // reasoning models (deepseek-v4-flash etc.) 流式内容在 reasoning_content 字段
+      return (delta?.content ?? delta?.reasoning_content) || undefined;
+    });
   }
 
   /** Anthropic Messages 流式（SSE）。 */
@@ -426,24 +440,38 @@ export class LLMSolverEngine implements ISolverEngine {
       const lines = buffer.split('\n');
       buffer = lines.pop() ?? '';
       for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) {
-          continue;
-        }
-        const data = trimmed.slice(5).trim();
-        if (data === '[DONE]') {
-          return;
-        }
-        try {
-          const json = JSON.parse(data);
-          const piece = extract(json);
-          if (piece) {
-            handlers.onChunk(piece);
-          }
-        } catch {
-          // 忽略无法解析的心跳 / 注释行。
-        }
+        this.processSseLine(line, extract, handlers);
       }
+    }
+    // 流结束时冲洗 buffer 中残留的未完整行（最后一行可能没有 \n 结尾）
+    if (buffer.trim()) {
+      this.processSseLine(buffer, extract, handlers);
+      buffer = '';
+    }
+  }
+
+  /** 处理单行 SSE 数据。 */
+  private processSseLine(
+    line: string,
+    extract: (json: any) => string | undefined,
+    handlers: StreamHandlers
+  ): void {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('data:')) {
+      return;
+    }
+    const data = trimmed.slice(5).trim();
+    if (data === '[DONE]') {
+      return;
+    }
+    try {
+      const json = JSON.parse(data);
+      const piece = extract(json);
+      if (piece) {
+        handlers.onChunk(piece);
+      }
+    } catch {
+      // 忽略无法解析的心跳 / 注释行。
     }
   }
 }

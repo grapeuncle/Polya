@@ -18,7 +18,13 @@ function extractSolutionJson(raw: string): Record<string, unknown> | null {
   let fallback: Record<string, unknown> | null = null;
 
   for (const candidate of candidates) {
-    const start = candidate.indexOf('{');
+    // 推理模型（deepseek-v4-flash 等）会在 JSON 前输出含 LaTeX 的推理文本，
+    // 如 \sqrt{3}、\frac{a}{b} 中的 { } 会干扰 indexOf('{') 定位。
+    // 优先用 "steps" 键名锚定 JSON 对象起始位置。
+    const stepsMatch = candidate.match(/\{\s*"steps"\s*:/);
+    const start = stepsMatch?.index != null
+      ? stepsMatch.index
+      : candidate.indexOf('{');
     const end = candidate.lastIndexOf('}');
     if (start < 0 || end <= start) {
       continue;
@@ -33,7 +39,24 @@ function extractSolutionJson(raw: string): Record<string, unknown> | null {
         fallback = obj;
       }
     } catch {
-      // try next block
+      // 若以 "steps" 锚定仍失败，回退到普通 indexOf('{') 再试一次
+      if (stepsMatch?.index != null) {
+        const fallbackStart = candidate.indexOf('{');
+        if (fallbackStart >= 0 && fallbackStart !== stepsMatch.index) {
+          try {
+            const jsonText2 = sanitizeLatexJson(candidate.slice(fallbackStart, end + 1));
+            const obj2 = JSON.parse(jsonText2) as Record<string, unknown>;
+            if (Array.isArray(obj2.steps)) {
+              return obj2;
+            }
+            if (!fallback) {
+              fallback = obj2;
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
     }
   }
   return fallback;
@@ -74,8 +97,24 @@ function parseSubAnswers(raw: unknown): SubAnswer[] {
 /** 从阶段 JSON 中解析该阶段的步骤列表。 */
 export function parsePhaseSteps(raw: string, phase: Phase): SolutionStep[] {
   const obj = extractSolutionJson(raw);
-  if (!obj || !Array.isArray(obj.steps)) {
-    return [];
+  if (obj && Array.isArray(obj.steps)) {
+    return normalizeSteps(obj.steps, phase);
   }
-  return normalizeSteps(obj.steps, phase);
+  // 推理模型（如 deepseek-v4-flash）可能不输出 JSON 包装，而是直接在推理文本中给出步骤内容。
+  // 此时将整段原始文本包装为一个步骤，确保 UI 仍能逐阶段展示。
+  const trimmed = raw.trim();
+  if (trimmed.length > 0) {
+    return normalizeSteps(
+      [
+        {
+          id: `${phase}-raw-1`,
+          phase,
+          content: trimmed,
+          metadata: {},
+        },
+      ],
+      phase
+    );
+  }
+  return [];
 }

@@ -6,7 +6,6 @@ import { PhaseNav } from './components/PhaseNav';
 import { ProblemInput } from './components/ProblemInput';
 import { StepCard } from './components/StepCard';
 import { Sidebar } from './components/Sidebar';
-import { MindMap } from './components/MindMap';
 import { GlobalAsk } from './components/GlobalAsk';
 import { ResultCard } from './components/ResultCard';
 import { BranchTree } from './components/BranchTree';
@@ -37,7 +36,6 @@ export const App: React.FC = () => {
   const onActionError = usePolyaStore((s) => s.onActionError);
   const onActionCancelled = usePolyaStore((s) => s.onActionCancelled);
   const confirmDifficultyRefresh = usePolyaStore((s) => s.confirmDifficultyRefresh);
-  const setViewMode = usePolyaStore((s) => s.setViewMode);
   const setShowFinalAnswer = usePolyaStore((s) => s.setShowFinalAnswer);
   const submitProblem = usePolyaStore((s) => s.submitProblem);
 
@@ -129,7 +127,6 @@ export const App: React.FC = () => {
 
   const solving = usePolyaStore((s) => s.solving);
   const solveError = usePolyaStore((s) => s.solveError);
-  const viewMode = usePolyaStore((s) => s.viewMode);
   const problem = usePolyaStore((s) => s.problem);
   const solution = usePolyaStore((s) => s.solution);
   const showFinalAnswer = usePolyaStore((s) => s.showFinalAnswer);
@@ -226,20 +223,6 @@ export const App: React.FC = () => {
         <div className="app-brand">
           <span className="codicon codicon-mortar-board" /> Polya 数学辅导
         </div>
-        <div className="view-toggle">
-          <button
-            className={viewMode === 'list' ? 'active' : ''}
-            onClick={() => setViewMode('list')}
-          >
-            <span className="codicon codicon-list-ordered" /> 步骤
-          </button>
-          <button
-            className={viewMode === 'mindmap' ? 'active' : ''}
-            onClick={() => setViewMode('mindmap')}
-          >
-            <span className="codicon codicon-type-hierarchy" /> 思维导图
-          </button>
-        </div>
       </header>
 
       <PhaseNav />
@@ -271,10 +254,9 @@ export const App: React.FC = () => {
               <button
                 className="link-btn session-back-btn"
                 onClick={() => goBackSession()}
-                disabled={solving}
-                title="返回上一题（内容已缓存，无需重新求解）"
+                title={solving ? '暂停当前解答并返回上一题（状态会保存，可随时继续）' : '返回上一题（内容已缓存，无需重新求解）'}
               >
-                <span className="codicon codicon-arrow-left" /> 返回上一题
+                <span className="codicon codicon-arrow-left" /> {solving ? '暂停并返回上一题' : '返回上一题'}
                 {sessionStack.length > 1 && (
                   <span className="session-depth">（共 {sessionStack.length} 层）</span>
                 )}
@@ -347,58 +329,54 @@ export const App: React.FC = () => {
             </div>
           )}
 
-          {viewMode === 'list' ? (
-            <div className="step-list">
-              {groupedSteps.map((group) => (
-                <React.Fragment key={group.key}>
-                  {group.label && (
-                    <SubProblemBanner
-                      index={group.subProblemIndex!}
-                      label={group.label}
-                      text={group.text!}
-                      status={group.status!}
-                    />
-                  )}
-                  {group.steps.map((step, i) => (
-                    <div id={`step-anchor-${step.id}`} key={step.id}>
-                      <StepCard step={step} index={i} />
+          <div className="step-list">
+            {groupedSteps.map((group) => (
+              <React.Fragment key={group.key}>
+                {group.label && (
+                  <SubProblemBanner
+                    index={group.subProblemIndex!}
+                    label={group.label}
+                    text={group.text!}
+                    status={group.status!}
+                  />
+                )}
+                {group.steps.map((step, i) => (
+                  <div id={`step-anchor-${step.id}`} key={step.id}>
+                    <StepCard step={step} index={i} />
+                  </div>
+                ))}
+                {/* 子问题最终答案 */}
+                {group.subProblemIndex != null &&
+                  solution?.subSolutions?.find((ss) => ss.index === group.subProblemIndex)
+                    ?.finalAnswer &&
+                  (showFinalAnswer || !teacherMode) && (
+                    <div className="final-answer">
+                      <span className="codicon codicon-check-all" />{' '}
+                      第 {group.subProblemIndex} 问答案：
+                      <MarkdownView
+                        content={
+                          solution.subSolutions.find(
+                            (ss) => ss.index === group.subProblemIndex
+                          )!.finalAnswer!
+                        }
+                        className="final-answer-content"
+                      />
                     </div>
-                  ))}
-                  {/* 子问题最终答案 */}
-                  {group.subProblemIndex != null &&
-                    solution?.subSolutions?.find((ss) => ss.index === group.subProblemIndex)
-                      ?.finalAnswer &&
-                    (showFinalAnswer || !teacherMode) && (
-                      <div className="final-answer">
-                        <span className="codicon codicon-check-all" />{' '}
-                        第 {group.subProblemIndex} 问答案：
-                        <MarkdownView
-                          content={
-                            solution.subSolutions.find(
-                              (ss) => ss.index === group.subProblemIndex
-                            )!.finalAnswer!
-                          }
-                          className="final-answer-content"
-                        />
-                      </div>
-                    )}
-                </React.Fragment>
-              ))}
-              {solution?.finalAnswer && (showFinalAnswer || !teacherMode) && (
-                <div className="final-answer">
-                  <span className="codicon codicon-check-all" /> 最终答案：
-                  <MarkdownView content={solution.finalAnswer} className="final-answer-content" />
-                </div>
-              )}
-              {solution?.finalAnswer && teacherMode && !showFinalAnswer && (
-                <button className="link-btn final-reveal" onClick={() => setShowFinalAnswer(true)}>
-                  显示最终答案（教师模式）
-                </button>
-              )}
-            </div>
-          ) : (
-            <MindMap />
-          )}
+                  )}
+              </React.Fragment>
+            ))}
+            {solution?.finalAnswer && (showFinalAnswer || !teacherMode) && (
+              <div className="final-answer">
+                <span className="codicon codicon-check-all" /> 最终答案：
+                <MarkdownView content={solution.finalAnswer} className="final-answer-content" />
+              </div>
+            )}
+            {solution?.finalAnswer && teacherMode && !showFinalAnswer && (
+              <button className="link-btn final-reveal" onClick={() => setShowFinalAnswer(true)}>
+                显示最终答案（教师模式）
+              </button>
+            )}
+          </div>
 
           {globalResults.length > 0 && (
             <div className="global-results">

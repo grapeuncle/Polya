@@ -48,6 +48,7 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
   const solveVariantProblem = usePolyaStore((s) => s.solveVariantProblem);
 
   const solving = usePolyaStore((s) => s.solving);
+  const sessionCache = usePolyaStore((s) => s.sessionCache);
 
   const results = usePolyaStore(
     useShallow((s) => s.results.filter((r) => r.stepId === step.id))
@@ -58,6 +59,7 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
   const meta = step.metadata;
 
   const isAnalogy = step.phase === 'analogy';
+  const pausedVariant = isAnalogy ? sessionCache[step.content]?.pausedAt ?? null : null;
 
   const mistakeSeverity = meta.mistakeSeverity ?? 'warning';
 
@@ -393,7 +395,11 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
 
             disabled={solving}
 
-            title="按完整解题流程（含举一反三）解答此变式题；当前题目会入栈，可随时返回"
+            title={pausedVariant
+
+              ? `继续解答此变式题（上次暂停于「${PHASE_META[pausedVariant].title}」阶段）`
+
+              : '按完整解题流程（含举一反三）解答此变式题；当前题目会入栈，可随时返回'}
 
             onMouseDown={(e) => e.stopPropagation()}
 
@@ -409,7 +415,9 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
 
           >
 
-            <span className="codicon codicon-play" /> 完整解答
+            <span className={`codicon ${pausedVariant ? 'codicon-debug-continue' : 'codicon-play'}`} />{' '}
+
+            {pausedVariant ? '继续解答' : '完整解答'}
 
           </button>
 
@@ -419,7 +427,7 @@ export const StepCard: React.FC<{ step: SolutionStep; index: number }> = ({ step
 
 
 
-      {selected && <FloatingMenu step={step} />}
+      {selected && !isAnalogy && <FloatingMenu step={step} />}
 
 
 

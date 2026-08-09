@@ -8,6 +8,7 @@ import {
   MenuActionId,
   MicroStep,
   Phase,
+  PHASE_META,
   PHASE_ORDER,
   Solution,
   SolutionBranch,
@@ -16,7 +17,7 @@ import {
 } from '../shared/types';
 import { normalizeSteps } from '../shared/normalizeStep';
 import { ACTION_TITLES, buildActionTitle, routeAction } from './actions/actionRouter';
-import { newRequestId, postMessage, showToast } from './transport';
+import { abortSolve, newRequestId, postMessage, showToast } from './transport';
 
 /** 一条动作结果卡片（解释 / 验算 / 对比等）。 */
 export interface ActionResult {
@@ -78,6 +79,8 @@ export interface SessionSnapshot {
   selectedSubProblemIndex: number | null;
   flagged: string[];
   expandedSubSteps: string[];
+  /** 解答是否被暂停（用户中途返回上一题）。非 null 时记录暂停时刻所处的阶段。 */
+  pausedAt: Phase | null;
 }
 
 export type ViewMode = 'list' | 'mindmap';
@@ -224,6 +227,7 @@ function captureSession(s: PolyaState): SessionSnapshot {
     selectedSubProblemIndex: s.selectedSubProblemIndex,
     flagged: s.flagged,
     expandedSubSteps: s.expandedSubSteps,
+    pausedAt: s.solving ? s.solvingPhase : null,
   };
 }
 
@@ -418,6 +422,27 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
     }));
     const cached = get().sessionCache[text];
     if (cached) {
+      if (cached.pausedAt !== null) {
+        // 之前被暂停的解答：恢复已生成的步骤与阶段，自动继续求解
+        set({
+          ...restoreSessionFields(cached),
+          sessionStack: get().sessionStack, // 保留刚入栈的当前会话
+        });
+        postMessage({ type: 'reportState', completedPhases: cached.completedPhases });
+        get().addHistory(`继续解答变式题（从「${PHASE_META[cached.pausedAt].title}」阶段恢复）：${text.slice(0, 20)}`);
+        showToast('info', `Polya：从「${PHASE_META[cached.pausedAt].title}」阶段恢复解答…`);
+        // 从暂停处重新开始完整求解（服务端会重新生成，但 UI 先展示已缓存的步骤）
+        postMessage({ type: 'solve', problem: text });
+        set({
+          solving: true,
+          solvingChunk: '',
+          solveError: null,
+          solution: null,
+          inputCollapsed: true,
+        });
+        return;
+      }
+      // 已完成解答的缓存：直接恢复
       set(restoreSessionFields(cached));
       postMessage({ type: 'reportState', completedPhases: cached.completedPhases });
       get().addHistory(`打开缓存的变式题解答：${text.slice(0, 20)}`);
@@ -430,18 +455,31 @@ export const usePolyaStore = create<PolyaState>((set, get) => ({
 
   goBackSession: () => {
     const s = get();
-    if (s.solving || s.sessionStack.length === 0) {
+    if (s.sessionStack.length === 0) {
       return;
     }
+    const wasSolving = s.solving;
+
+    // 若当前正在解答中，先中断 SSE 连接，保存暂停状态的快照
+    if (wasSolving) {
+      abortSolve();
+    }
+
+    // 捕获当前会话并写入缓存（无论是否完成，均缓存以支持暂停后恢复）
     const cur = captureSession(s);
     const prev = s.sessionStack[s.sessionStack.length - 1];
     set((st) => ({
       sessionStack: st.sessionStack.slice(0, -1),
-      sessionCache: cur.solution ? cacheSession(st.sessionCache, cur) : st.sessionCache,
+      sessionCache: cacheSession(st.sessionCache, cur),
       ...restoreSessionFields(prev),
     }));
     postMessage({ type: 'reportState', completedPhases: prev.completedPhases });
-    get().addHistory(`返回上一题：${prev.problem.slice(0, 20)}`);
+    if (wasSolving) {
+      get().addHistory(`暂停解答并返回上一题：${prev.problem.slice(0, 20)}`);
+      showToast('info', 'Polya：已暂停当前解答，状态已保存。再次点击「完整解答」可继续。');
+    } else {
+      get().addHistory(`返回上一题：${prev.problem.slice(0, 20)}`);
+    }
   },
 
   onSolutionStart: (problem) =>

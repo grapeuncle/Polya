@@ -316,6 +316,7 @@ export type WebviewToExtMessage =
   | { type: 'setDifficulty'; difficulty: Difficulty }
   | { type: 'copy'; text: string }
   | { type: 'cancelAction'; requestId: string }
+  | { type: 'cancelSolve' }
   | { type: 'reportState'; completedPhases: Phase[] }
   | { type: 'info'; message: string }
   | { type: 'error'; message: string }

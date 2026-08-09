@@ -12,6 +12,8 @@ const API = '/api';
 
 let sessionId: string | null = null;
 const handlers = new Set<(msg: ExtToWebviewMessage) => void>();
+/** 当前正在进行的解题 SSE 连接的 AbortController，用于中断举一反三解答。 */
+let solveAbortController: AbortController | null = null;
 
 const PREFS_KEY = 'polya.prefs';
 
@@ -163,6 +165,9 @@ export function postMessage(msg: WebviewToExtMessage): void {
     case 'cancelAction':
       void postCancel(msg.requestId);
       break;
+    case 'cancelSolve':
+      abortSolve();
+      break;
     case 'reportState':
       void postReportState(msg.completedPhases);
       break;
@@ -186,14 +191,42 @@ export function postMessage(msg: WebviewToExtMessage): void {
 }
 
 export function postSolve(problem: string): void {
+  // 先中止上一次可能还在进行的求解
+  abortSolve();
   void (async () => {
-    const res = await fetch(`${API}/solve`, {
-      method: 'POST',
-      headers: sessionHeaders(),
-      body: JSON.stringify({ problem }),
-    });
-    await consumeSse(res);
-  })();
+    const controller = new AbortController();
+    solveAbortController = controller;
+    try {
+      const res = await fetch(`${API}/solve`, {
+        method: 'POST',
+        headers: { ...sessionHeaders(), 'X-Solve-Id': '1' },
+        body: JSON.stringify({ problem }),
+        signal: controller.signal,
+      });
+      await consumeSse(res);
+    } catch (e: unknown) {
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        // 用户主动中断求解，无需报错
+        return;
+      }
+      throw e;
+    } finally {
+      if (solveAbortController === controller) {
+        solveAbortController = null;
+      }
+    }
+  })().catch((e) => {
+    console.error('[transport] solve SSE 连接异常', e);
+    dispatch({ type: 'solveError', message: e instanceof Error ? e.message : String(e) });
+  });
+}
+
+/** 中止当前正在进行的解题 SSE 连接（用于举一反三暂停）。 */
+export function abortSolve(): void {
+  if (solveAbortController) {
+    solveAbortController.abort();
+    solveAbortController = null;
+  }
 }
 
 async function postActionSse(

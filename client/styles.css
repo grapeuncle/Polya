@@ -93,20 +93,6 @@ body {
   align-items: center;
   gap: 6px;
 }
-.view-toggle button {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--vscode-foreground);
-  padding: 4px 10px;
-  cursor: pointer;
-  border-radius: 6px;
-  margin-left: 6px;
-}
-.view-toggle button.active {
-  background: var(--accent);
-  color: var(--accent-fg);
-  border-color: var(--accent);
-}
 
 /* ===== 阶段导航 ===== */
 .phase-nav {

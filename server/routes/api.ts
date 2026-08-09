@@ -119,6 +119,11 @@ export function createApiRouter(appConfig: AppConfig): Router {
       res.status(400).json({ error: `题目过长（${problem.length} 字符），最多允许 ${MAX_PROBLEM_LENGTH} 字符。` });
       return;
     }
+    // 客户端断开连接时，主动中止服务端求解
+    // 使用 res.on('close') 而非 req.on('close')，因为 req.close 会在 body 解析后误触发导致 fetch 挂起
+    res.on('close', () => {
+      service.handleMessage({ type: 'cancelSolve' }).catch(() => {});
+    });
     await runSseTask(res, service, () => service.startSolve(problem.trim()));
   });
 
